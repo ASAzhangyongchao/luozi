@@ -196,8 +196,9 @@ pub fn run_focus_abc_probe_blocking(app: AppHandle) -> Result<FocusProbeReport, 
             frontmost_after_overlay: String::new(),
             typing_ok: false,
             focus_ok: false,
-            message: "请在系统设置 → 隐私与安全性 → 辅助功能 中允许 Luozi，然后点一次「自动测焦点」"
-                .into(),
+            message:
+                "请在系统设置 → 隐私与安全性 → 辅助功能 中允许 Luozi，然后点一次「自动测焦点」"
+                    .into(),
         });
     }
 
@@ -241,10 +242,7 @@ pub fn run_focus_abc_probe_blocking(app: AppHandle) -> Result<FocusProbeReport, 
 
     let typed_value = focused_ax_value().unwrap_or_else(|e| format!("<read_error:{e}>"));
     let typing_ok = typed_value.replace('\u{fffc}', "").contains("ABC");
-    let focus_ok = !stole
-        && is_text_edit(&before)
-        && is_text_edit(&during)
-        && is_text_edit(&after);
+    let focus_ok = !stole && is_text_edit(&before) && is_text_edit(&during) && is_text_edit(&after);
     let ok = typing_ok && focus_ok && text_edit_activated;
 
     let message = if ok {

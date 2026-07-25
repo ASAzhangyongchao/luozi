@@ -21,6 +21,9 @@
         <button id="register" type="button">Register</button>
         <button id="clear" type="button">Unregister all</button>
         <button id="autoFocus" type="button">自动测焦点</button>
+        <button id="audioProbe" type="button">测麦克风 1s</button>
+        <button id="showOverlay" type="button">显示悬浮条</button>
+        <button id="hideOverlay" type="button">隐藏悬浮条</button>
       </div>
       <p id="status">Not registered</p>
       <h2>Events</h2>
@@ -29,6 +32,8 @@
       <pre id="focusReport" aria-live="polite"></pre>
       <h2>Target / delivery</h2>
       <pre id="deliveryReport" aria-live="polite"></pre>
+      <h2>Audio probe</h2>
+      <pre id="audioReport" aria-live="polite"></pre>
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>

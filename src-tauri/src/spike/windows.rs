@@ -7,8 +7,8 @@ use windows::Win32::System::Com::{
 };
 use windows::Win32::UI::Accessibility::{
     CUIAutomation, IUIAutomation, IUIAutomationElement, IUIAutomationValuePattern,
-    TreeScope_Element, UIA_IsPasswordPropertyId, UIA_ProcessIdPropertyId,
-    UIA_RuntimeIdPropertyId, UIA_ValuePatternId, UIA_ControlTypePropertyId,
+    TreeScope_Element, UIA_ControlTypePropertyId, UIA_IsPasswordPropertyId,
+    UIA_ProcessIdPropertyId, UIA_RuntimeIdPropertyId, UIA_ValuePatternId,
 };
 
 use super::target::{TargetToken, ValidationState};

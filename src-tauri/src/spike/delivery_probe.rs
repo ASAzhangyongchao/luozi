@@ -326,7 +326,11 @@ fn case_secure_password() -> DeliveryCaseResult {
 }
 
 pub fn run_delivery_matrix_blocking() -> DeliveryMatrixReport {
-    let cases = vec![case_same_target(), case_changed_app(), case_secure_password()];
+    let cases = vec![
+        case_same_target(),
+        case_changed_app(),
+        case_secure_password(),
+    ];
     let ok = cases.iter().all(|c| c.pass);
     let message = if ok {
         "pass: delivery safety matrix".into()

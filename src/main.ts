@@ -44,10 +44,22 @@ async function main() {
   const registerButton = document.querySelector<HTMLButtonElement>("#register")!;
   const clearButton = document.querySelector<HTMLButtonElement>("#clear")!;
   const autoFocusButton = document.querySelector<HTMLButtonElement>("#autoFocus")!;
+  const audioProbeButton = document.querySelector<HTMLButtonElement>("#audioProbe")!;
+  const showOverlayButton = document.querySelector<HTMLButtonElement>("#showOverlay")!;
+  const hideOverlayButton = document.querySelector<HTMLButtonElement>("#hideOverlay")!;
   const status = document.querySelector<HTMLParagraphElement>("#status")!;
   const events = document.querySelector<HTMLPreElement>("#events")!;
   const focusReport = document.querySelector<HTMLPreElement>("#focusReport")!;
   const deliveryReport = document.querySelector<HTMLPreElement>("#deliveryReport")!;
+  const audioReport = document.querySelector<HTMLPreElement>("#audioReport")!;
+
+  type AudioProbeResult = {
+    sampleRate: number;
+    channels: number;
+    frames: number;
+    bytes: number;
+    deleted: boolean;
+  };
 
   let sequence = 0;
   let deliveryRun = 0;
@@ -153,6 +165,29 @@ async function main() {
       focusReport.textContent = String(error);
       status.textContent = `Focus probe failed: ${String(error)}`;
     }
+  });
+
+  audioProbeButton.addEventListener("click", async () => {
+    audioReport.textContent = "Recording 1s…";
+    try {
+      const report = await invoke<AudioProbeResult>("record_one_second_probe");
+      audioReport.textContent = JSON.stringify(report, null, 2);
+      status.textContent = report.deleted
+        ? `Audio probe ok; wav deleted (${report.frames} frames)`
+        : `Audio probe ok but wav delete failed (${report.frames} frames)`;
+    } catch (error) {
+      audioReport.textContent = String(error);
+      status.textContent = `Audio probe failed: ${String(error)}`;
+    }
+  });
+
+  showOverlayButton.addEventListener("click", () => {
+    void overlay?.show();
+    status.textContent = "Overlay shown (for material visual check)";
+  });
+  hideOverlayButton.addEventListener("click", () => {
+    void overlay?.hide();
+    status.textContent = "Overlay hidden";
   });
 
   window.addEventListener("beforeunload", () => {

@@ -203,7 +203,8 @@ unsafe fn capture_focused() -> Result<FocusedAx, String> {
         || subrole.to_lowercase().contains("secure");
 
     let window_id = if let Some(window) = window {
-        let w_role = copy_string_attr(window, kAXRoleAttribute).unwrap_or_else(|| "AXWindow".into());
+        let w_role =
+            copy_string_attr(window, kAXRoleAttribute).unwrap_or_else(|| "AXWindow".into());
         let w_sub = copy_string_attr(window, kAXSubroleAttribute).unwrap_or_default();
         format!("pid={pid};{}", element_identity(window, &w_role, &w_sub))
     } else {

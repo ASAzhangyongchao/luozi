@@ -1,3 +1,5 @@
+mod audio;
+mod overlay_cycle;
 mod target;
 
 #[cfg(target_os = "macos")]
@@ -8,6 +10,9 @@ mod focus_probe;
 mod macos;
 #[cfg(target_os = "windows")]
 mod windows;
+
+pub use audio::{record_one_second_probe, run_audio_probe_blocking};
+pub use overlay_cycle::{run_overlay_cycle_blocking, run_overlay_cycle_probe};
 
 #[cfg(target_os = "macos")]
 pub use delivery_probe::{run_delivery_matrix_blocking, run_delivery_matrix_probe};

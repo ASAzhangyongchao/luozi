@@ -1,0 +1,39 @@
+{
+  "date": "2026-07-25",
+  "machine": "macOS 26.5.2 arm64",
+  "inputSource": "com.tencent.inputmethod.wetype.pinyin",
+  "continueSpeaking": {
+    "shortcut": "Control+Alt+Space",
+    "short": {
+      "attempts": 10,
+      "pressed": 10,
+      "released": 10,
+      "duplicates": 0,
+      "driver": "System Events"
+    },
+    "hold1s": {
+      "attempts": 10,
+      "pressed": 10,
+      "released": 10,
+      "duplicates": 0,
+      "driver": "CoreGraphics"
+    },
+    "hold5s": {
+      "attempts": 10,
+      "pressed": 10,
+      "released": 10,
+      "duplicates": 0,
+      "driver": "CoreGraphics",
+      "note": "The accessibility text snapshot initially lagged the final Released line; event sequence 1-20 became visible on the next refresh with the expected timestamps."
+    },
+    "restartRegistration": true,
+    "browser": "Safari local focus fixture appended ABC without refocus"
+  },
+  "voiceEdit": {
+    "shortcut": "Control+Alt+M",
+    "registrationConfirmed": true,
+    "priorObservedPairs": 3,
+    "fullMatrix": "pending",
+    "note": "The synthetic letter-key driver did not trigger the registered shortcut in this closure run; physical-key 10x and hold matrices remain required."
+  }
+}

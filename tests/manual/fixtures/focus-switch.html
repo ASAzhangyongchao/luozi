@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Luozi M0 Focus Switch</title>
+    <style>
+      body {
+        display: grid;
+        gap: 16px;
+        margin: 80px;
+        max-width: 420px;
+        font-family: system-ui, sans-serif;
+      }
+
+      input,
+      button {
+        box-sizing: border-box;
+        width: 100%;
+        padding: 12px;
+        font: inherit;
+      }
+    </style>
+  </head>
+  <body>
+    <label for="first">First field</label>
+    <input id="first" autocomplete="off" />
+    <label for="second">Second field</label>
+    <input id="second" autocomplete="off" />
+    <button id="outside" type="button">Non-input focus target</button>
+    <script>
+      document.getElementById("first").focus();
+    </script>
+  </body>
+</html>

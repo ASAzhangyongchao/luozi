@@ -31,10 +31,9 @@
         "skipTaskbar": true,
         "focus": false,
         "focusable": false,
-        "transparent": true
+        "transparent": false
       }
     ],
-    "macOSPrivateApi": true,
     "security": {
       "csp": null
     }

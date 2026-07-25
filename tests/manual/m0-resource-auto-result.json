@@ -1,0 +1,44 @@
+{
+  "capturedAt": "2026-07-25T14:35:13+08:00",
+  "durationSeconds": 300,
+  "scope": "Release Spike main window open and idle; not final tray idle",
+  "sampling": {
+    "tool": "top",
+    "intervalSeconds": 1,
+    "samples": 300,
+    "mainProcess": {
+      "pid": 79332,
+      "cpuP95Percent": 0.3,
+      "cpuMaxPercent": 1.1,
+      "memoryFirstMiB": 27.0,
+      "memoryLastMiB": 27.0,
+      "memoryMinMiB": 27.0,
+      "memoryMaxMiB": 28.0
+    },
+    "relatedProcessTotal": {
+      "pids": [
+        79332,
+        79382,
+        79383,
+        79384
+      ],
+      "cpuP95Percent": 0.5,
+      "cpuMaxPercent": 1.9,
+      "memoryFirstMiB": 74.53,
+      "memoryLastMiB": 74.47,
+      "memoryMinMiB": 74.42,
+      "memoryMaxMiB": 87.52
+    }
+  },
+  "rssSnapshots": {
+    "startRelatedTotalMiB": 164.16,
+    "endRelatedTotalMiB": 107.78,
+    "endMainProcessMiB": 59.70
+  },
+  "continuousGrowthObserved": false,
+  "limitations": [
+    "This Spike has no tray-only lifecycle, so it cannot prove the final tray-idle 120 MiB target.",
+    "The three WebKit PIDs were associated by adjacent launch time and process role.",
+    "Per-process GPU usage was not instrumented."
+  ]
+}

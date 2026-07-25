@@ -1,0 +1,49 @@
+{
+  "date": "2026-07-25",
+  "machine": "macOS 26.5.2 arm64",
+  "fixture": "tests/manual/fixtures/focus-switch.html",
+  "cases": [
+    {
+      "name": "same_app_switch_to_second_field",
+      "capturedAtMs": 1784962968931,
+      "validation": "changed",
+      "firstField": "",
+      "secondField": "",
+      "secondFieldFocused": true,
+      "misdeliveryCount": 0,
+      "pass": true
+    },
+    {
+      "name": "non_input_button_focus",
+      "capturedAtMs": 1784963003651,
+      "validation": "same_target",
+      "delivered": "unsupported",
+      "firstField": "",
+      "secondField": "",
+      "buttonFocused": true,
+      "misdeliveryCount": 0,
+      "pass": true
+    },
+    {
+      "name": "safari_overlay_abc",
+      "actualValue": "ABABC",
+      "expectedSuffix": "ABC",
+      "refocusedBeforeSuffixComplete": false,
+      "pass": true,
+      "note": "The first AB was retained by asynchronous AX clearing from the preceding run; the new run appended the full ABC suffix."
+    },
+    {
+      "name": "overlay_click_frontmost",
+      "frontmostBefore": "Safari",
+      "frontmostDuring": "Safari",
+      "frontmostAfterClick": "Safari",
+      "overlayFrame": {
+        "x": 720,
+        "y": 291,
+        "width": 360,
+        "height": 72
+      },
+      "pass": true
+    }
+  ]
+}

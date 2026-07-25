@@ -23,7 +23,7 @@
       "actual": "secure",
       "delivered": "secure",
       "pass": true,
-      "detail": "element=pid=19221;role=AXTextField;subrole=AXSecureTextField;id=;p=200.0,200.0;s=349.0x56.0"
+      "detail": "element=pid=19221;role=AXTextField;subrole=AXSecureTextField;id=;p=240.0,232.0;s=349.0x56.0"
     }
   ],
   "message": "pass: delivery safety matrix"

@@ -112,3 +112,46 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn m0_macos_fallback_does_not_enable_private_api() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).expect("valid Tauri config");
+        let private_api = config
+            .pointer("/app/macOSPrivateApi")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let cargo_manifest = include_str!("../Cargo.toml");
+
+        assert!(!private_api, "M0 must not enable app.macOSPrivateApi");
+        assert!(
+            !cargo_manifest.contains("macos-private-api"),
+            "M0 must not compile Tauri's macos-private-api feature"
+        );
+    }
+
+    #[test]
+    fn m0_overlay_uses_opaque_fallback_without_private_api() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).expect("valid Tauri config");
+        let overlay = config
+            .pointer("/app/windows")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|windows| {
+                windows.iter().find(|window| {
+                    window.get("label").and_then(serde_json::Value::as_str) == Some("overlay")
+                })
+            })
+            .expect("overlay window");
+
+        assert_eq!(
+            overlay
+                .get("transparent")
+                .and_then(serde_json::Value::as_bool),
+            Some(false),
+            "M0 fallback must use an opaque window until a public native material bridge exists"
+        );
+    }
+}

@@ -57,9 +57,18 @@ async function main() {
   const spikeCard = document.querySelector<HTMLElement>("#spikeCard")!;
 
   const config = await invoke<AppConfig>("get_app_config");
+  let registeredContinue = config.continueSpeakingShortcut;
+  try {
+    const st = await invoke<{ registeredContinue?: string | null }>("session_status");
+    if (st.registeredContinue) registeredContinue = st.registeredContinue;
+  } catch {
+    /* session command may be unavailable in very early boot */
+  }
   shortcutList.innerHTML = `
-    <li>继续说：<code>${config.continueSpeakingShortcut}</code></li>
-    <li>语音修改：<code>${config.voiceEditShortcut}</code></li>
+    <li>继续说：<code>${registeredContinue}</code>${
+      config.shortcutsProvisional ? "（provisional）" : ""
+    }</li>
+    <li>语音修改：<code>${config.voiceEditShortcut}</code>（未启用）</li>
     <li>按住说话：${config.holdToTalk ? "开" : "关"}</li>
     <li>schemaVersion：${config.schemaVersion}</li>
   `;
@@ -68,9 +77,9 @@ async function main() {
     "落字 Luozi  0.0.0",
     `schemaVersion=${config.schemaVersion}`,
     `shortcutsProvisional=${config.shortcutsProvisional}`,
-    `continue=${config.continueSpeakingShortcut}`,
+    `continue=${registeredContinue}`,
     `voiceEdit=${config.voiceEditShortcut}`,
-    "M0 Overall=Partial · Mac-first 受限 M1",
+    "M2 假文本会话 · Mac-first",
     "尚无可下载 Release",
   ].join("\n");
 
@@ -86,14 +95,16 @@ async function main() {
     typeof window !== "undefined" &&
     new URLSearchParams(window.location.search).has("spike");
 
+  // Product hotkey: prefer Rust registration; surface actual binding in UI.
+  status.textContent = spikeEnabled
+    ? "Spike 模式（开发）"
+    : `练习窗 · 按住 ${registeredContinue} ≥0.3s 松手落字 · Esc 取消`;
+
   if (!spikeEnabled) {
-    status.textContent = "练习窗 · 托盘可打开关于 / 退出";
     return;
   }
 
   spikeCard.hidden = false;
-  status.textContent = "Spike 模式（开发）";
-
   const shortcut = document.querySelector<HTMLSelectElement>("#shortcut")!;
   const registerButton = document.querySelector<HTMLButtonElement>("#register")!;
   const clearButton = document.querySelector<HTMLButtonElement>("#clear")!;

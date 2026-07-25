@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Luozi Falling Cursor mark">
+  <!-- Transparent outside rounded night-teal squircle (Dock-safe) -->
+  <rect width="128" height="128" rx="28" fill="#0B3034"/>
+  <path d="M38 46c-8 8-10 20-6 30" fill="none" stroke="#42D9D3" stroke-width="5" stroke-linecap="round" opacity="0.9"/>
+  <path d="M90 42c7 6 9 16 5 26" fill="none" stroke="#42D9D3" stroke-width="4.5" stroke-linecap="round" opacity="0.75"/>
+  <rect x="60" y="28" width="8" height="46" rx="4" fill="#F4FBFA"/>
+  <circle cx="64" cy="82" r="6.5" fill="#42D9D3"/>
+  <rect x="42" y="96" width="44" height="6" rx="3" fill="#F4FBFA" opacity="0.92"/>
+</svg>

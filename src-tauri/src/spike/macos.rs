@@ -16,8 +16,9 @@ use core_foundation::base::{CFRelease, CFRetain, TCFType};
 use core_foundation::boolean::CFBoolean;
 use core_foundation::dictionary::CFDictionary;
 use core_foundation::string::CFString;
-use core_graphics::event::{CGEvent, CGEventTapLocation};
+use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation, KeyCode};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+use objc2_app_kit::NSWorkspace;
 use std::thread;
 use std::time::Duration;
 
@@ -152,49 +153,53 @@ impl Drop for FocusedAx {
     }
 }
 
-unsafe fn capture_focused() -> Result<FocusedAx, String> {
-    let system = AXUIElementCreateSystemWide();
-    if system.is_null() {
-        return Err("AXUIElementCreateSystemWide returned null".into());
+fn frontmost_pid() -> Option<i32> {
+    let workspace = NSWorkspace::sharedWorkspace();
+    let app = workspace.frontmostApplication()?;
+    let pid = app.processIdentifier();
+    if pid > 0 {
+        Some(pid)
+    } else {
+        None
     }
+}
 
-    let app_value = match copy_attr(system, kAXFocusedApplicationAttribute) {
-        Ok(v) => v,
-        Err(e) => {
-            CFRelease(system as _);
-            return Err(e);
-        }
-    };
-    let app = app_value as AXUIElementRef;
+fn trusted_status_label() -> &'static str {
+    match ensure_accessibility() {
+        Ok(()) => "trusted",
+        Err(_) => "NOT_trusted",
+    }
+}
 
-    let focused_value = match copy_attr(system, kAXFocusedUIElementAttribute) {
-        Ok(v) => v,
-        Err(e) => {
-            CFRelease(app as _);
-            CFRelease(system as _);
-            return Err(e);
-        }
-    };
+unsafe fn capture_focused_from_app(app: AXUIElementRef) -> Result<FocusedAx, String> {
+    let focused_value = copy_attr(app, kAXFocusedUIElementAttribute).or_else(|_| {
+        // Some apps expose focus only via system-wide after app resolve.
+        let system = AXUIElementCreateSystemWide();
+        let result = copy_attr(system, kAXFocusedUIElementAttribute);
+        CFRelease(system as _);
+        result
+    })?;
     let focused = focused_value as AXUIElementRef;
 
-    let window = match copy_attr(system, kAXFocusedWindowAttribute) {
-        Ok(v) => Some(v as AXUIElementRef),
-        Err(_) => copy_attr(app, kAXFocusedWindowAttribute)
-            .ok()
-            .map(|v| v as AXUIElementRef),
-    };
-    CFRelease(system as _);
+    let window = copy_attr(app, kAXFocusedWindowAttribute)
+        .ok()
+        .map(|v| v as AXUIElementRef);
 
     let mut pid: i32 = 0;
     let pid_err = AXUIElementGetPid(focused, &mut pid);
     if pid_err != kAXErrorSuccess || pid <= 0 {
-        CFRelease(focused as _);
-        if let Some(window) = window {
-            CFRelease(window as _);
+        let app_pid_err = AXUIElementGetPid(app, &mut pid);
+        if app_pid_err != kAXErrorSuccess || pid <= 0 {
+            CFRelease(focused as _);
+            if let Some(window) = window {
+                CFRelease(window as _);
+            }
+            return Err(format!("AXUIElementGetPid failed ({pid_err}/{app_pid_err})"));
         }
-        CFRelease(app as _);
-        return Err(format!("AXUIElementGetPid failed ({pid_err})"));
     }
+
+    // Retain app for FocusedAx drop ownership.
+    CFRetain(app as _);
 
     let role = copy_string_attr(focused, kAXRoleAttribute).unwrap_or_else(|| "unknown".into());
     let subrole = copy_string_attr(focused, kAXSubroleAttribute).unwrap_or_default();
@@ -222,6 +227,78 @@ unsafe fn capture_focused() -> Result<FocusedAx, String> {
         app,
         window,
     })
+}
+
+unsafe fn capture_focused() -> Result<FocusedAx, String> {
+    eprintln!("luozi: AX status={}", trusted_status_label());
+
+    let system = AXUIElementCreateSystemWide();
+    if !system.is_null() {
+        match copy_attr(system, kAXFocusedApplicationAttribute) {
+            Ok(app_value) => {
+                let app = app_value as AXUIElementRef;
+                CFRelease(system as _);
+                match capture_focused_from_app(app) {
+                    Ok(v) => {
+                        CFRelease(app as _);
+                        return Ok(v);
+                    }
+                    Err(e) => {
+                        eprintln!("luozi: AX focused-app path failed: {e}");
+                        CFRelease(app as _);
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("luozi: AXFocusedApplication: {e}");
+                CFRelease(system as _);
+            }
+        }
+    }
+
+    // Path B: NSWorkspace frontmost app → AX application element.
+    let pid = frontmost_pid().ok_or_else(|| {
+        format!(
+            "no focused AX app and no frontmost app (AX={})",
+            trusted_status_label()
+        )
+    })?;
+    eprintln!("luozi: AX fallback frontmost pid={pid}");
+    let app = AXUIElementCreateApplication(pid);
+    if app.is_null() {
+        return Err(format!("AXUIElementCreateApplication({pid}) returned null"));
+    }
+    match capture_focused_from_app(app) {
+        Ok(v) => {
+            CFRelease(app as _);
+            Ok(v)
+        }
+        Err(e) => {
+            CFRelease(app as _);
+            Err(e)
+        }
+    }
+}
+
+/// Write already happened; synthesize ⌘V into the frontmost app so text lands at caret.
+pub(crate) fn paste_via_cmd_v() -> Result<(), String> {
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+        .map_err(|_| "cg_event_source_failed".to_string())?;
+    let key = KeyCode::ANSI_V;
+    let flags = CGEventFlags::CGEventFlagCommand;
+
+    let down = CGEvent::new_keyboard_event(source.clone(), key, true)
+        .map_err(|_| "cg_key_down_failed".to_string())?;
+    down.set_flags(flags);
+    down.post(CGEventTapLocation::HID);
+
+    thread::sleep(Duration::from_millis(20));
+
+    let up = CGEvent::new_keyboard_event(source, key, false)
+        .map_err(|_| "cg_key_up_failed".to_string())?;
+    up.set_flags(flags);
+    up.post(CGEventTapLocation::HID);
+    Ok(())
 }
 
 fn role_supports_text_insert(role: &str) -> bool {
@@ -395,6 +472,11 @@ pub(crate) fn validate_target(token: &TargetToken) -> Result<ValidationState, St
 }
 
 pub(crate) fn deliver_probe(token: &TargetToken) -> Result<ValidationState, String> {
+    deliver_text(token, "落字测试")
+}
+
+/// Insert `text` into the focused field when validation still matches `token`.
+pub(crate) fn deliver_text(token: &TargetToken, text: &str) -> Result<ValidationState, String> {
     let state = validate_target(token)?;
     match state {
         ValidationState::SameTarget => {}
@@ -414,17 +496,17 @@ pub(crate) fn deliver_probe(token: &TargetToken) -> Result<ValidationState, Stri
             return Ok(ValidationState::Unsupported);
         }
 
-        let text = CFString::new("落字测试");
+        let cf_text = CFString::new(text);
         let attr = CFString::new(kAXSelectedTextAttribute);
         let err = AXUIElementSetAttributeValue(
             current.focused,
             attr.as_concrete_TypeRef(),
-            text.as_CFTypeRef(),
+            cf_text.as_CFTypeRef(),
         );
         if err == kAXErrorSuccess {
             Ok(ValidationState::SameTarget)
         } else {
-            // Do not simulate paste. Caller should treat as clipboard fallback.
+            eprintln!("luozi: AXSelectedText set failed ({err}); caller may paste");
             Ok(ValidationState::Unsupported)
         }
     }

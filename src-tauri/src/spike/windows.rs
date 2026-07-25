@@ -112,6 +112,10 @@ pub fn validate_target(token: &TargetToken) -> Result<ValidationState, String> {
 }
 
 pub fn deliver_probe(token: &TargetToken) -> Result<ValidationState, String> {
+    deliver_text(token, "落字测试")
+}
+
+pub fn deliver_text(token: &TargetToken, text: &str) -> Result<ValidationState, String> {
     let state = validate_target(token)?;
     match state {
         ValidationState::SameTarget => {}
@@ -140,8 +144,7 @@ pub fn deliver_probe(token: &TargetToken) -> Result<ValidationState, String> {
         }
     };
 
-    // Only write a short probe string; never read password contents.
-    match unsafe { pattern.SetValue(&windows::core::BSTR::from("落字测试")) } {
+    match unsafe { pattern.SetValue(&windows::core::BSTR::from(text)) } {
         Ok(()) => Ok(ValidationState::SameTarget),
         Err(_) => Ok(ValidationState::Unsupported),
     }

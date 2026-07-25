@@ -93,17 +93,33 @@ pub fn validate_target(token: TargetToken) -> Result<ValidationState, String> {
 
 #[tauri::command]
 pub fn deliver_probe(token: TargetToken) -> Result<ValidationState, String> {
+    deliver_text(token, "落字测试".into())
+}
+
+pub fn deliver_text(token: TargetToken, text: String) -> Result<ValidationState, String> {
     #[cfg(target_os = "macos")]
     {
-        macos::deliver_probe(&token)
+        macos::deliver_text(&token, &text)
     }
     #[cfg(target_os = "windows")]
     {
-        windows::deliver_probe(&token)
+        windows::deliver_text(&token, &text)
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
-        let _ = token;
-        Err("deliver_probe unsupported on this platform".into())
+        let _ = (token, text);
+        Err("deliver_text unsupported on this platform".into())
+    }
+}
+
+/// After writing the clipboard, synthesize ⌘V so text lands at the caret.
+pub fn paste_via_cmd_v() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        macos::paste_via_cmd_v()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err("paste_via_cmd_v unsupported on this platform".into())
     }
 }

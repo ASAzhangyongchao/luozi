@@ -15,11 +15,12 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 luozi-core = { path = "../crates/luozi-core" }
-tauri = { version = "2", features = ["tray-icon"] }
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 cpal = "0.18.1"
 hound = "3.5.1"
+arboard = "3"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-global-shortcut = "2"

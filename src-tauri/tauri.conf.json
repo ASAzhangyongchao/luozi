@@ -13,11 +13,28 @@
     "withGlobalTauri": true,
     "windows": [
       {
+        "label": "main",
         "title": "Luozi",
         "width": 800,
         "height": 600
+      },
+      {
+        "label": "overlay",
+        "title": "Luozi Overlay",
+        "url": "overlay.html",
+        "width": 360,
+        "height": 72,
+        "visible": false,
+        "alwaysOnTop": true,
+        "decorations": false,
+        "resizable": false,
+        "skipTaskbar": true,
+        "focus": false,
+        "focusable": false,
+        "transparent": true
       }
     ],
+    "macOSPrivateApi": true,
     "security": {
       "csp": null
     }

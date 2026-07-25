@@ -3,12 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Luozi</title>
+    <title>落字</title>
   </head>
   <body>
     <main class="container">
-      <h1>落字 · Luozi</h1>
-      <p id="status">练习窗 · M1 骨架</p>
+      <div class="brand">
+        <h1>落字</h1>
+        <span class="en">Luozi</span>
+      </div>
+      <p id="status">练习窗</p>
 
       <section class="card" id="aboutCard" hidden>
         <h2>关于</h2>
@@ -17,15 +20,16 @@
       </section>
 
       <section class="card">
-        <h2>练习</h2>
-        <p>当前快捷键为 provisional（Mac-first Partial，未正式定稿）。</p>
+        <h2>当前配置</h2>
+        <p>快捷键仍为 provisional（Mac-first Partial），正式定稿前可改。</p>
         <ul id="shortcutList"></ul>
-        <p>关闭窗口会隐藏到托盘；从托盘「退出」才结束进程。</p>
       </section>
+
+      <p class="hint">关闭窗口会回到托盘。托盘菜单：练习窗 / 关于 / 退出。</p>
 
       <section class="card" id="spikeCard" hidden>
         <h2>M0 Spike（开发）</h2>
-        <p>仅在设置 <code>LUOZI_M0_SPIKE=1</code> 时显示，避免误触写入。</p>
+        <p>仅 URL 带 <code>?spike</code> 时显示。</p>
         <label for="shortcut">Candidate</label>
         <select id="shortcut">
           <option>Control+Alt+Space</option>

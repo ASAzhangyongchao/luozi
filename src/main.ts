@@ -92,7 +92,7 @@ async function main() {
   }
 
   spikeCard.hidden = false;
-  status.textContent = "Spike 模式已启用";
+  status.textContent = "Spike 模式（开发）";
 
   const shortcut = document.querySelector<HTMLSelectElement>("#shortcut")!;
   const registerButton = document.querySelector<HTMLButtonElement>("#register")!;

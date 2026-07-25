@@ -1,31 +1,93 @@
 :root {
-  color: #1b1b1b;
-  background: #f6f4ef;
-  font-family: "SF Pro Text", "PingFang SC", system-ui, sans-serif;
-  line-height: 1.5;
+  --ink: #f4f1ea;
+  --ink-muted: color-mix(in srgb, #f4f1ea 68%, #0f3d3e);
+  --surface: #0f3d3e;
+  --surface-raised: color-mix(in srgb, #145456 82%, #0a2a2b);
+  --amber: #e8a54b;
+  --line: color-mix(in srgb, #f4f1ea 14%, transparent);
+  color: var(--ink);
+  background:
+    radial-gradient(1200px 500px at 20% -10%, color-mix(in srgb, #e8a54b 18%, transparent), transparent 55%),
+    linear-gradient(165deg, #124647 0%, #0b3031 48%, #082425 100%);
+  font-family: "Iowan Old Style", "Songti SC", "PingFang SC", Georgia, serif;
+  line-height: 1.55;
 }
 
 body {
   margin: 0;
+  min-height: 100vh;
 }
 
 .container {
-  max-width: 720px;
+  max-width: 640px;
   margin: 0 auto;
-  padding: 28px 20px 48px;
+  padding: 40px 28px 56px;
 }
 
-h1 {
-  margin: 0 0 8px;
-  font-size: 1.75rem;
+.brand {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.brand h1 {
+  margin: 0;
+  font-size: 2.4rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.brand .en {
+  font-family: "Avenir Next", "Helvetica Neue", sans-serif;
+  font-size: 0.95rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+
+#status {
+  margin: 0 0 28px;
+  color: var(--ink-muted);
+  font-family: "Avenir Next", "PingFang SC", sans-serif;
+  font-size: 0.95rem;
 }
 
 .card {
-  margin-top: 16px;
-  padding: 16px;
-  border: 1px solid color-mix(in srgb, #1b1b1b 12%, transparent);
-  border-radius: 12px;
-  background: #fffdf8;
+  margin-top: 14px;
+  padding: 18px 18px 16px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--surface-raised) 88%, transparent);
+  backdrop-filter: blur(10px);
+}
+
+.card h2 {
+  margin: 0 0 10px;
+  font-size: 1.05rem;
+  font-family: "Avenir Next", "PingFang SC", sans-serif;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.card p,
+.card li {
+  font-family: "Avenir Next", "PingFang SC", sans-serif;
+  color: var(--ink-muted);
+}
+
+#shortcutList {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+#shortcutList code {
+  color: var(--ink);
+  background: color-mix(in srgb, #000 22%, transparent);
+  padding: 0.1em 0.4em;
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.88em;
 }
 
 .actions {
@@ -38,16 +100,36 @@ h1 {
 button,
 select {
   font: inherit;
+  font-family: "Avenir Next", "PingFang SC", sans-serif;
+}
+
+button {
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, #e8a54b 16%, transparent);
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 0.45rem 0.9rem;
+  cursor: pointer;
+}
+
+button:hover {
+  background: color-mix(in srgb, #e8a54b 28%, transparent);
 }
 
 pre {
   white-space: pre-wrap;
   word-break: break-word;
-  background: #f0ece3;
-  padding: 10px;
-  border-radius: 8px;
+  background: color-mix(in srgb, #000 28%, transparent);
+  padding: 12px;
+  border-radius: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82rem;
+  color: var(--ink-muted);
 }
 
-code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+.hint {
+  margin-top: 18px;
+  font-size: 0.85rem;
+  color: var(--ink-muted);
+  font-family: "Avenir Next", "PingFang SC", sans-serif;
 }

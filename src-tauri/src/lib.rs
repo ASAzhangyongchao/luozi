@@ -22,9 +22,9 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&practice, &about, &quit])?;
 
-    let _tray = TrayIconBuilder::new()
+    let mut tray = TrayIconBuilder::new()
         .menu(&menu)
-        .tooltip("Luozi")
+        .tooltip("落字 Luozi")
         .on_menu_event(|app, event| match event.id.as_ref() {
             "practice" => {
                 if let Some(window) = app.get_webview_window("main") {
@@ -57,9 +57,13 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
                     let _ = window.set_focus();
                 }
             }
-        })
-        .build(app)?;
+        });
 
+    if let Some(icon) = app.default_window_icon() {
+        tray = tray.icon(icon.clone());
+    }
+
+    let _tray = tray.build(app)?;
     Ok(())
 }
 

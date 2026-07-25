@@ -14,6 +14,8 @@ dist-ssr
 .worktrees/
 target/
 src-tauri/target/
+src-tauri/icons/android/
+src-tauri/icons/ios/
 
 # Editor directories and files
 .vscode/*

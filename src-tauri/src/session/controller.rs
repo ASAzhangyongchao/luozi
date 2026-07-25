@@ -90,16 +90,6 @@ fn map_validation(state: ValidationState) -> TargetValidation {
     }
 }
 
-fn show_overlay(app: &AppHandle, visible: bool) {
-    if let Some(window) = app.get_webview_window("overlay") {
-        if visible {
-            let _ = window.show();
-        } else {
-            let _ = window.hide();
-        }
-    }
-}
-
 fn is_main_thread() -> bool {
     #[cfg(target_os = "macos")]
     {
@@ -114,22 +104,29 @@ fn is_main_thread() -> bool {
     }
 }
 
-/// Run Accessibility / UI work on the AppKit main thread (required on macOS).
-fn on_main_thread<R, F>(app: &AppHandle, f: F) -> Result<R, String>
+const MAIN_THREAD_AX_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// Dispatch to AppKit main with a hard timeout.
+/// NEVER call blocking AX work while already on the main thread — that beachballs Esc.
+fn on_main_thread_timeout<R, F>(
+    app: &AppHandle,
+    timeout: std::time::Duration,
+    f: F,
+) -> Result<R, String>
 where
     R: Send + 'static,
     F: FnOnce() -> R + Send + 'static,
 {
     if is_main_thread() {
-        return Ok(f());
+        return Err("refused_ax_on_main_thread".into());
     }
     let (tx, rx) = std::sync::mpsc::sync_channel(1);
     app.run_on_main_thread(move || {
         let _ = tx.send(f());
     })
     .map_err(|e| format!("main_thread_dispatch_failed: {e}"))?;
-    rx.recv()
-        .map_err(|_| "main_thread_result_dropped".into())
+    rx.recv_timeout(timeout)
+        .map_err(|_| "main_thread_timeout".into())
 }
 
 fn dummy_token() -> TargetToken {
@@ -144,26 +141,55 @@ fn dummy_token() -> TargetToken {
     }
 }
 
-/// Capture focused target. Prefer calling from the AppKit main thread.
+/// Best-effort focus capture with timeout. Never blocks the AppKit main run loop from itself.
 pub fn capture_source_token(app: &AppHandle) -> TargetToken {
-    match spike::capture_target() {
-        Ok(t) if t.is_secure => {
+    let app_c = app.clone();
+    match on_main_thread_timeout(app, MAIN_THREAD_AX_TIMEOUT, move || {
+        match spike::capture_target() {
+            Ok(t) => Ok(t),
+            Err(err) => Err(err),
+        }
+    }) {
+        Ok(Ok(t)) if t.is_secure => {
             emit_phase(app, "rejected", "安全输入区域：未开始录音");
             t
         }
-        Ok(t) => {
+        Ok(Ok(t)) => {
             eprintln!(
                 "luozi: capture ok pid={} role={}",
                 t.process_id, t.role
             );
             t
         }
-        Err(err) => {
+        Ok(Err(err)) => {
             eprintln!("luozi: capture_target soft-fail: {err}");
             emit_phase(app, "warn", "未捕获输入框，将落到剪贴板");
             dummy_token()
         }
+        Err(err) => {
+            eprintln!("luozi: capture skipped: {err}");
+            emit_phase(app, "warn", "捕获超时，将落到剪贴板");
+            let _ = app_c;
+            dummy_token()
+        }
     }
+}
+
+fn show_overlay(app: &AppHandle, visible: bool) {
+    // Never block session control on overlay show/hide.
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let app2 = app.clone();
+        let _ = on_main_thread_timeout(&app, MAIN_THREAD_AX_TIMEOUT, move || {
+            if let Some(window) = app2.get_webview_window("overlay") {
+                if visible {
+                    let _ = window.show();
+                } else {
+                    let _ = window.hide();
+                }
+            }
+        });
+    });
 }
 
 #[derive(Debug)]
@@ -182,9 +208,21 @@ fn apply_delivery(app: &AppHandle, state: &AppSessionState, text: &str) -> bool 
         .and_then(|g| g.clone())
         .unwrap_or_else(dummy_token);
 
+    // Fresh capture at deliver time (start skipped AX on purpose).
+    let token = {
+        let fresh = capture_source_token(app);
+        if fresh.process_id != 0 {
+            fresh
+        } else if token.process_id != 0 {
+            token
+        } else {
+            fresh
+        }
+    };
+
     let token_for_ax = token.clone();
     let text_owned = text.to_string();
-    let outcome = on_main_thread(app, move || {
+    let outcome = on_main_thread_timeout(app, MAIN_THREAD_AX_TIMEOUT, move || {
         let validation = spike::validate_target(token_for_ax.clone())
             .unwrap_or(ValidationState::Unsupported);
         match route_delivery(map_validation(validation)) {
@@ -224,7 +262,7 @@ fn apply_delivery(app: &AppHandle, state: &AppSessionState, text: &str) -> bool 
             write_clipboard(app, state, text)
         }
         Err(err) => {
-            eprintln!("luozi: deliver dispatch failed: {err}; clipboard fallback");
+            eprintln!("luozi: deliver AX timeout/skip ({err}); clipboard+⌘V fallback");
             write_clipboard(app, state, text)
         }
     };
@@ -295,13 +333,9 @@ fn fail_transcribe(app: &AppHandle, state: &AppSessionState, err: String) -> Res
 }
 
 pub fn start_session(app: &AppHandle, state: &AppSessionState) -> Result<SessionStatus, String> {
-    let token = if is_main_thread() {
-        capture_source_token(app)
-    } else {
-        let app_c = app.clone();
-        on_main_thread(app, move || capture_source_token(&app_c))?
-    };
-    start_session_with_token(app, state, token)
+    // HARD RULE: never wait on Accessibility before opening the mic.
+    // Capture runs in the background; deliver path falls back to clipboard+⌘V.
+    start_session_with_token(app, state, dummy_token())
 }
 
 pub fn start_session_with_token(
@@ -339,6 +373,25 @@ pub fn start_session_with_token(
             arm_escape(app);
             emit_phase(app, "recording", "听写中 · Esc 取消");
 
+            // Best-effort focus capture in background (never blocks start).
+            let app_cap = app.clone();
+            std::thread::spawn(move || {
+                let t = capture_source_token(&app_cap);
+                if t.is_secure {
+                    // Too late to reject cleanly mid-record; cancel instead.
+                    if let Some(state) = app_cap.try_state::<AppSessionState>() {
+                        let _ = cancel_session(&app_cap, &state);
+                        emit_phase(&app_cap, "rejected", "安全输入区域：已取消");
+                    }
+                    return;
+                }
+                if t.process_id != 0 {
+                    if let Some(state) = app_cap.try_state::<AppSessionState>() {
+                        let _ = state.source_target.lock().map(|mut g| *g = Some(t));
+                    }
+                }
+            });
+
             // Auto-stop at max duration.
             let app_handle = app.clone();
             let sid = session_id;
@@ -347,7 +400,6 @@ pub fn start_session_with_token(
                 let Some(state) = app_handle.try_state::<AppSessionState>() else {
                     return;
                 };
-                // Only auto-stop while still Recording — never cancel in-flight ASR.
                 let should_stop = state
                     .machine
                     .lock()
@@ -356,6 +408,25 @@ pub fn start_session_with_token(
                     == Some(sid);
                 if should_stop {
                     let _ = stop_session(&app_handle, &state);
+                }
+            });
+
+            // Watchdog: if still Recording well past max, force-cancel (Esc-dead scenarios).
+            let app_wd = app.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(MAX_RECORDING_MS + 5_000));
+                let Some(state) = app_wd.try_state::<AppSessionState>() else {
+                    return;
+                };
+                let stuck = state
+                    .machine
+                    .lock()
+                    .ok()
+                    .and_then(|m| m.recording_session_id())
+                    == Some(sid);
+                if stuck {
+                    eprintln!("luozi: watchdog force-cancel stuck recording {sid}");
+                    let _ = cancel_session(&app_wd, &state);
                 }
             });
 

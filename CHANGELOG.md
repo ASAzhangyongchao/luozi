@@ -16,10 +16,13 @@
 
 ### Fixed
 
+- Hotkey path hardened: mic starts with zero AX wait; main-thread AX has 250ms timeout; overlay show/hide is non-blocking; stuck-recording watchdog force-cancels
 - Duplicate stop during ASR no longer cancels in-flight Whisper (Released / auto-stop races)
 - ASR no longer holds the engine mutex across multi-second `full()`; Esc can mark stale
 - Empty mic buffers fail early; multi-segment transcripts join with spaces
 - Tray shows model-missing until `ggml-small.bin` is present
+- AX permission prompts removed from hot path (they beachballed the app)
+- Escape stays registered for the whole process life
 
 ### Notes
 

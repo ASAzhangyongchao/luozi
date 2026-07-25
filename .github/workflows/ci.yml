@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "spike/**", "m1/**", "codex/**"]
+  pull_request:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install frontend deps
+        run: npm ci
+
+      - name: Frontend build
+        run: npm run build
+
+      - name: Rust fmt
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test --workspace
+
+      - name: Tauri compile (no bundle)
+        run: cargo check -p luozi

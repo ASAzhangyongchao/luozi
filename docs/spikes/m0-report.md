@@ -84,7 +84,7 @@
 
 ## Next Actions (M0 boundary)
 
-1. 不创建公开 GitHub 仓，不添加 knowledge-system submodule，不编写 / 执行 M1。
-2. 先补最少的 macOS 人工项：实体按键验证 `Control+Alt+M`，麦克风拒绝 / 恢复；系统认证框、无设备 / 断开若当前环境不可构造，保持明确 pending。
-3. 当前 Partial 只说明 Mac 核心路线证据更充分，不等于 “Mac 风险全部关闭”。
-4. 若继续产品化，下一步应由用户明确批准：补 Windows Spike，或修订门禁并采用 “Mac-first Partial → 受限 M1 计划”。
+1. ~~不创建公开 GitHub 仓，不添加 knowledge-system submodule，不编写 / 执行 M1。~~
+2. **2026-07-25 用户批准**：进入 Mac-first 受限 M1（见知识库路线图 §3.6）。仍不创建公开仓、不挂 submodule，直至 M1 完成且用户再次确认。
+3. 携带缺口：实体按键验证 `Control+Alt+M`、麦克风拒绝 / 恢复、系统认证框、无设备 / 断开、Word / VS Code、Windows 实机。
+4. 执行计划：`docs/superpowers/plans/2026-07-25-落字Luozi-M1-Mac-first公开仓骨架.md`（knowledge-system）。

@@ -1,15 +1,75 @@
 mod spike;
 
+use luozi_core::AppConfig;
 use spike::{
     capture_target, deliver_probe, record_one_second_probe, run_delivery_matrix_probe,
     run_focus_abc_probe, run_overlay_cycle_probe, validate_target,
 };
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Emitter, Manager, WindowEvent,
+};
+
+#[tauri::command]
+fn get_app_config() -> AppConfig {
+    AppConfig::default()
+}
+
+fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
+    let practice = MenuItem::with_id(app, "practice", "练习窗", true, None::<&str>)?;
+    let about = MenuItem::with_id(app, "about", "关于", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&practice, &about, &quit])?;
+
+    let _tray = TrayIconBuilder::new()
+        .menu(&menu)
+        .tooltip("Luozi")
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "practice" => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+            "about" => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.emit("luozi://show-about", ());
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+            "quit" => {
+                app.exit(0);
+            }
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                let app = tray.app_handle();
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+        })
+        .build(app)?;
+
+    Ok(())
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
+            build_tray(app.handle())?;
+
             #[cfg(target_os = "macos")]
             {
                 use std::fs;
@@ -97,10 +157,18 @@ pub fn run() {
                 });
             }
 
-            let _ = app;
             Ok(())
         })
+        .on_window_event(|window, event| {
+            if window.label() == "main" {
+                if let WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
+            get_app_config,
             run_focus_abc_probe,
             run_delivery_matrix_probe,
             run_overlay_cycle_probe,

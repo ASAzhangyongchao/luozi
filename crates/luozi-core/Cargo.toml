@@ -1,0 +1,11 @@
+[package]
+name = "luozi-core"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Shared Luozi types and AppConfig schema"
+publish = false
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }

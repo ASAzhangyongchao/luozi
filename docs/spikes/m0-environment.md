@@ -3,8 +3,8 @@
 ## Git
 
 - Product root: `/Users/zhangyongchao/knowledge-system/apps/luozi` (moved from `~/project/luozi`)
-
-- Baseline commit: 9b58df0a8c6297e49b2f77073baf26732cb5acfb
+- Baseline commit: `9b58df0a8c6297e49b2f77073baf26732cb5acfb`
+- M0 report commit under test: `47dcf6b6b7291b84ecdeb8bac4b95f1f3e3c88e2` (`spike/m0`)
 
 ## macOS
 
@@ -15,15 +15,18 @@
 - Node: v20.20.2
 - npm: 10.8.2
 - Tauri: tauri-cli 2.11.4
+- Accessibility: granted to Luozi for Spike probes
+- Microphone: granted for 1s probe
 
 ## Windows
 
-- OS: pending real-machine verification
-- Architecture: pending
-- Rust toolchain: pending
-- Node: pending
-- npm: pending
-- MSVC: pending
+- OS: not available (operator has Mac only as of 2026-07-25)
+- Architecture: not available
+- Rust toolchain: not available
+- Node: not available
+- npm: not available
+- MSVC: not available
+- Consequence: M0 overall decision is **Partial**; Windows matrices remain blank / not available
 
 ## Evidence rule
 

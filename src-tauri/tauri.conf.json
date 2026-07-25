@@ -14,9 +14,11 @@
     "windows": [
       {
         "label": "main",
-        "title": "Luozi",
+        "title": "落字 · 练习",
         "width": 800,
-        "height": 600
+        "height": 600,
+        "visible": false,
+        "skipTaskbar": true
       },
       {
         "label": "overlay",

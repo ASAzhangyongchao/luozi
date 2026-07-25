@@ -306,6 +306,10 @@ pub fn run() {
         )
         .manage(AppSessionState::default())
         .setup(|app| {
+            // Tray-first: never leave a blank main window on launch.
+            if let Some(main) = app.get_webview_window("main") {
+                let _ = main.hide();
+            }
             build_tray(app.handle())?;
             match register_session_shortcuts(app.handle()) {
                 Ok(name) => eprintln!("luozi: hotkey ready → {name}"),

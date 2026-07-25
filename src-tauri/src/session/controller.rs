@@ -12,10 +12,12 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 
 use crate::spike::{self, TargetToken, ValidationState};
 
+use super::asr::{self, AsrEngine};
 use super::clipboard::ClipboardGate;
 use super::recorder::{SessionRecorder, MAX_RECORDING_MS};
 
-/// M2 placeholder transcript until ASR (M3).
+/// Kept for docs/tests that mention the M2 placeholder string.
+#[allow(dead_code)]
 pub const FAKE_TRANSCRIPT: &str = "落字测试";
 
 fn arm_escape(app: &AppHandle) {
@@ -35,6 +37,8 @@ pub struct AppSessionState {
     pub recorder: Mutex<SessionRecorder>,
     pub clipboard: Mutex<ClipboardGate>,
     pub source_target: Mutex<Option<TargetToken>>,
+    /// Lazy-loaded Whisper context (M3).
+    pub asr: Mutex<Option<AsrEngine>>,
     /// Actually registered continue-speaking binding (may differ from config provisional).
     pub registered_continue: Mutex<Option<String>>,
     #[allow(dead_code)]
@@ -48,6 +52,7 @@ impl Default for AppSessionState {
             recorder: Mutex::new(SessionRecorder::new()),
             clipboard: Mutex::new(ClipboardGate::default()),
             source_target: Mutex::new(None),
+            asr: Mutex::new(None),
             registered_continue: Mutex::new(None),
             config: AppConfig::default(),
         }
@@ -374,8 +379,6 @@ pub fn stop_session(app: &AppHandle, state: &AppSessionState) -> Result<SessionS
     };
 
     let duration_ms = audio.as_ref().map(|a| a.duration_ms).unwrap_or(duration_ms);
-    // Drop samples immediately — M2 does not run ASR.
-    drop(audio);
 
     let effect = {
         let mut machine = state.machine.lock().map_err(|_| "session_lock_failed")?;
@@ -392,16 +395,43 @@ pub fn stop_session(app: &AppHandle, state: &AppSessionState) -> Result<SessionS
         }
         SessionEffect::BeginTranscribe { session_id } => {
             emit_phase(app, "transcribing", "落字中");
+            let language = state.config.language.clone();
+            let transcript = {
+                let capture = audio.ok_or_else(|| "asr_no_audio".to_string())?;
+                let mut engine = state.asr.lock().map_err(|_| "asr_lock_failed")?;
+                match asr::transcribe_capture(
+                    &mut engine,
+                    &capture.samples,
+                    capture.sample_rate,
+                    capture.channels,
+                    &language,
+                ) {
+                    Ok(text) => {
+                        eprintln!("luozi: asr ok → {text}");
+                        text
+                    }
+                    Err(err) => {
+                        eprintln!("luozi: asr failed: {err}");
+                        let _ = state.machine.lock().map(|mut m| {
+                            m.handle(SessionCommand::Cancel);
+                        });
+                        disarm_escape(app);
+                        show_overlay(app, false);
+                        emit_phase(app, "error", &err);
+                        return Err(err);
+                    }
+                }
+            };
             let deliver_effect = {
                 let mut machine = state.machine.lock().map_err(|_| "session_lock_failed")?;
                 machine.handle(SessionCommand::TranscriptionReady {
                     session_id,
-                    text: FAKE_TRANSCRIPT.into(),
+                    text: transcript,
                 })
             };
             match deliver_effect {
                 SessionEffect::Deliver { session_id, text } => {
-                    eprintln!("luozi: delivering fake transcript ({duration_ms}ms hold)");
+                    eprintln!("luozi: delivering transcript ({duration_ms}ms hold)");
                     // Hide overlay first so the source app keeps / regains key focus for paste.
                     disarm_escape(app);
                     show_overlay(app, false);
@@ -474,7 +504,7 @@ fn status_from(state: &AppSessionState, message: String) -> Result<SessionStatus
         phase: phase_name(machine.phase()).into(),
         session_id: machine.active_session_id(),
         can_undo,
-        fake_transcript: true,
+        fake_transcript: false,
         registered_continue,
         message,
     })

@@ -54,7 +54,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let status = MenuItem::with_id(
         app,
         "status",
-        "假文本就绪 · 快捷键临时",
+        "Whisper 就绪 · 快捷键临时",
         false,
         None::<&str>,
     )?;
@@ -82,7 +82,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let engine = MenuItem::with_id(
         app,
         "engine",
-        "引擎：假文本（M2）",
+        "引擎：本地 Whisper（M3）",
         false,
         None::<&str>,
     )?;

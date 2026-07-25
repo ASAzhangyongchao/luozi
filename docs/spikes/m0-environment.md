@@ -4,7 +4,8 @@
 
 - Product root: `/Users/zhangyongchao/knowledge-system/apps/luozi` (moved from `~/project/luozi`)
 - Baseline commit: `9b58df0a8c6297e49b2f77073baf26732cb5acfb`
-- M0 report commit under test: `47dcf6b6b7291b84ecdeb8bac4b95f1f3e3c88e2` (`spike/m0`)
+- Prior M0 implementation commit: `47dcf6b6b7291b84ecdeb8bac4b95f1f3e3c88e2` (`spike/m0`)
+- macOS closure implementation commit tested: `cc1038b` (`codex/m0-mac-closure`)
 
 ## macOS
 
@@ -15,7 +16,7 @@
 - Node: v20.20.2
 - npm: 10.8.2
 - Tauri: tauri-cli 2.11.4
-- Accessibility: granted to Luozi for Spike probes
+- Accessibility: granted to the development Spike used for AX probes; the separately packaged Release App requires its own grant
 - Microphone: granted for 1s probe
 
 ## Windows

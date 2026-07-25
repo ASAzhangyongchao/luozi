@@ -3,9 +3,11 @@
 - Date: 2026-07-25
 - Machine: macOS arm64
 - App version: 0.0.0 / spike/m0
+- Tested implementation commit: `cc1038b`
 - Auto evidence:
   - `tests/manual/m0-audio-auto-result.json`
   - `tests/manual/m0-overlay-cycle-result.json`
+  - `tests/manual/m0-resource-auto-result.json`
 
 ## Microphone
 
@@ -23,13 +25,17 @@
 
 | Item | Value |
 |---|---|
-| Material name | CSS semantic blur (`backdrop-filter` + translucent Canvas) |
-| Private vibrancy API | not used for material (window still uses existing transparent + `macOSPrivateApi` from Task 4) |
-| Reduced transparency fallback | `@media (prefers-reduced-transparency: reduce)` → opaque Canvas |
-| Steals focus on show/hide | no (Task 4 TextEdit probe) |
-| 30 show/hide cycles | **pass** (`ok: true`, 2590 ms) |
-| Idle 60s CPU | pending (not instrumented) |
-| Screenshot of degrade | pending |
+| Material name | Standard opaque Canvas fallback |
+| Private API | **disabled**: no `app.macOSPrivateApi`; no Tauri `macos-private-api` feature |
+| Native Liquid Glass / vibrancy | pending narrow public AppKit bridge; not claimed by M0 |
+| Reduced transparency fallback | same opaque high-contrast Canvas, so no transparency-dependent failure |
+| Steals focus on show/hide or click | no (TextEdit and Safari probes) |
+| 30 show/hide cycles | **pass** (`ok: true`, 2592 ms) |
+| Idle 5 min CPU | Release Spike main window open: main P95 0.3%; related-process total P95 0.5% |
+| Idle memory | `top` related total 74.53 → 74.47 MiB, max 87.52 MiB; no continuous growth |
+| RSS snapshots | related total 164.16 MiB at start → 107.78 MiB at end |
+| Screenshot of degrade | `m0-overlay-opaque-fallback.png` |
+| Limitation | This is not final tray-only idle; per-process GPU was not instrumented |
 
 ## Build smoke
 
@@ -39,6 +45,7 @@
 | `cargo check` | **pass** |
 | `cargo fmt` | **pass** (applied) |
 | `cargo clippy -D warnings` | **pass** |
-| `npm run tauri build` | **pass** |
+| `npm run tauri build` | **pass outside the command sandbox**; sandboxed `hdiutil` returned “设备未配置” |
 | Artifact path | `src-tauri/target/release/bundle/macos/Luozi.app` ; `src-tauri/target/release/bundle/dmg/Luozi_0.0.0_aarch64.dmg` |
-| Gatekeeper note | ad-hoc / linker-signed (`Signature=adhoc`); `spctl` reported accepted with `override=security disabled` on this machine |
+| Launch / restart | **pass**; packaged App launched, quit, relaunched, and auto-registered the default Space shortcut |
+| Gatekeeper note | ad-hoc / linker-signed (`Signature=adhoc`); `spctl` accepted only with `override=security disabled` on this machine; no distribution claim |

@@ -4,11 +4,12 @@
 
 本报告只覆盖热键、不抢焦点悬浮窗、安全目标复核、麦克风 / 系统材质和双端构建。
 
-不覆盖：会话状态机、whisper.cpp / ASR、工作台、文本 AI、公开仓、Release。
+不覆盖：会话状态机、whisper.cpp / ASR、工作台、文本 AI、公开仓、公开分发。
 
 ## Commit
 
-- Tested commit: `47dcf6b6b7291b84ecdeb8bac4b95f1f3e3c88e2` (`spike/m0`)
+- Tested implementation commit: `cc1038b` (`codex/m0-mac-closure`)
+- Prior M0 implementation commit: `47dcf6b6b7291b84ecdeb8bac4b95f1f3e3c88e2` (`spike/m0`)
 - Product root: `/Users/zhangyongchao/knowledge-system/apps/luozi`
 - Report date: 2026-07-25
 - macOS machine: arm64, macOS 26.5.2 (Build 25F84)
@@ -17,40 +18,48 @@
 
 | Gate | macOS | Windows | Overall | Evidence |
 |---|---|---|---|---|
-| G1 Hotkey Pressed / Released | pass (with limits) | not available | partial | `tests/manual/m0-hotkey-macos.md`；`Fn` fail；四组非 Fn 候选有 Pressed/Released |
-| G2 Non-activating overlay | pass (TextEdit) | not available | partial | `tests/manual/m0-focus-delivery-macos.md`；`m0-focus-auto-result.json`；Word / VS Code 本机无；浏览器 overlay ABC 未跑全 |
-| G3 Target validation and safe delivery | pass (auto core cases) | not available | partial | `m0-delivery-auto-result.json`：same_target / changed / secure 均 pass；无焦点、同 App 切框、认证框未覆盖 |
-| G4 Permission and material fallback | pass (core) | not available | partial | `m0-permission-material-macos.md`；`m0-audio-auto-result.json`；拒绝麦克风 / 无设备 / 断开未手工模拟；60s idle CPU 未采 |
-| G5 Build and launch | pass | not available | partial | `Luozi.app` + `Luozi_0.0.0_aarch64.dmg`；adhoc 签名 |
+| G1 Hotkey Pressed / Released | partial | not available | partial | `Control+Alt+Space` 已完成短按 / 1s / 5s 各 10 次、WeType、Safari 与重启复注册；`Control+Alt+M` 仍缺实体按键全矩阵；Word / VS Code 本机无 |
+| G2 Non-activating overlay | partial | not available | partial | TextEdit / Safari 焦点不变、Safari 连续输入与点击悬浮条均通过；Word / VS Code 本机无；一次固定延时初始化丢首字母但未发生焦点切换 |
+| G3 Target validation and safe delivery | partial | not available | partial | same target、切 App、同 App 切输入框、安全输入、无输入焦点均通过且零误投；系统认证框未覆盖 |
+| G4 Permission and material fallback | partial | not available | partial | 录音允许与清理、不透明降级、5 分钟资源基线通过；拒绝权限 / 无设备 / 录音中断开、GPU、原生系统材质未覆盖 |
+| G5 Build and launch | pass (internal build / launch) | not available | partial | `Luozi.app` + `Luozi_0.0.0_aarch64.dmg` 构建、启动、退出、重启通过；仅 adhoc 签名，不作分发结论 |
 
 ## Default Shortcut Decision
 
 | Platform | Continue speaking | Voice edit | Evidence |
 |---|---|---|---|
-| macOS | `Control+Alt+Space` | `Control+Alt+M` | 官方插件可注册；有 Pressed/Released；`Fn` 不可用。冲突矩阵（IME / Word / 浏览器 / VS Code / 重启）未完整跑完，故为 provisional default |
+| macOS | `Control+Alt+Space` | `Control+Alt+M` | 两者保持 provisional，不回写为正式默认键。Space 的短按 / 长按 / IME / Safari / 重启证据已齐；M 仅确认可注册并有既往事件，仍缺实体按键完整矩阵；`Fn` 不可用 |
 | Windows | none | none | 无 Windows 实机，不选定 |
 
 ## Security Assertions
 
-- New-focus misdelivery count: `0`（已测：等待中切 App → `changed`，零插入）
+- New-focus misdelivery count: `0`（已测：等待中切 App、同 App 切输入框 → `changed`，零插入）
+- Non-input insertion count: `0`（按钮焦点 → `unsupported`，两个文本框均为空）
 - Secure-input insertion count: `0`（密码框 → `secure`，未写入）
 - Secure-input clipboard write count: `0`（M0 探针不写剪贴板）
 - Secure-input full-text feedback count: `0`（不读取/日志密码正文）
 
-未覆盖用例（不计入上述计数，但阻止 Overall Go）：无输入焦点、同 App 另一输入框、系统认证框。
+未覆盖用例（不计入上述计数，但阻止 Overall Go）：macOS 系统认证框。
 
 ## Resource Notes
 
-- macOS idle CPU / memory: not instrumented
+- macOS Release Spike（主窗口打开，非最终托盘态）5 分钟、300 次采样：
+  - 主进程 CPU P95 `0.3%`，max `1.1%`
+  - 相关 4 进程总 CPU P95 `0.5%`，max `1.9%`
+  - `top` 相关进程内存首值 `74.53 MiB`、末值 `74.47 MiB`、max `87.52 MiB`，未见持续增长
+  - RSS 快照相关进程总量 `164.16 MiB → 107.78 MiB`；主进程末值 `59.70 MiB`
+  - 3 个 WebKit 进程按相邻启动时间与角色归入本次 Spike
+  - 未采集单进程 GPU；当前 Spike 没有托盘生命周期，不能据此声明最终托盘态 `≤ 120 MiB`
 - Windows idle CPU / memory: not available
-- 30 overlay cycles: pass（`m0-overlay-cycle-result.json`，约 2590 ms，`ok: true`）
+- 30 overlay cycles: pass（`m0-overlay-cycle-result.json`，2592 ms，`ok: true`，`stoleFocus: false`）
 
 ## Platform Fallbacks
 
 - macOS:
   - `Fn`：官方插件无法识别 → 首版放弃 `Fn`，不引入低级钩子
-  - 透明悬浮条：Tauri `transparent` + 现有 `macOSPrivateApi`；材质用 CSS `backdrop-filter`，非私有 vibrancy API
-  - `prefers-reduced-transparency: reduce` → 不透明 Canvas 高对比背景
+  - 悬浮条：关闭 Tauri `macOSPrivateApi` 与窗口透明，使用标准不透明 Canvas 作为可验收降级
+  - 原生 Liquid Glass / vibrancy：M0 尚未完成公开 AppKit 材质桥接，不宣称已实现系统液态玻璃
+  - 降低透明度：同样落到不透明高对比 Canvas，不依赖透明效果也可读
   - AX 无法安全写入 → 返回 `unsupported`，预期剪贴板回退（M0 不实际覆盖剪贴板）
   - 安全输入 / 目标变化 → `secure` / `changed`，零插入
 - Windows:
@@ -62,17 +71,20 @@
 - Result: **Partial**
 - Blocking failures:
   1. Windows 实机不可用（路线图要求双端才可 Go）
-  2. macOS 热键冲突矩阵与重启复注册未完整
-  3. Word / VS Code 本机缺失；浏览器 overlay ABC 未完整
-  4. 交付安全矩阵若干分支未覆盖（无焦点、同 App 切框、认证框）
-  5. 麦克风拒绝 / 无设备 / 断开路径未手工验证
+  2. macOS 语音修改键 `Control+Alt+M` 缺实体按键短按 / 1s / 5s 各 10 次，以及应用冲突复核；Word / VS Code 本机缺失
+  3. 系统认证框安全分支未验证
+  4. 麦克风拒绝 / 无设备 / 录音中断开路径未手工验证
+  5. 原生公开系统材质未验证；当前仅确认无私有 API 的不透明降级可用
+  6. 最终托盘生命周期与 GPU 尚不能由当前主窗口 Spike 度量
 - Required spec changes:
-  - 记录 macOS provisional 默认键：继续说 `Control+Alt+Space`，语音修改 `Control+Alt+M`
-  - 明确首版不依赖 `Fn`
+  - 暂不把候选键写成正式默认：继续说 `Control+Alt+Space`、语音修改 `Control+Alt+M` 继续保留 provisional
+  - 记录首版不依赖 `Fn`，也不为它引入低级钩子
+  - 记录无私有 API 的不透明 Canvas 为 M0 可用降级；原生系统材质另行验证
   - Windows 默认键与平台回退保持 “待实机后写入”，不在本报告假装已定
 
 ## Next Actions (M0 boundary)
 
 1. 不创建公开 GitHub 仓，不添加 knowledge-system submodule，不编写 / 执行 M1。
-2. 用户仅有 Mac 时：可将本 Partial 作为 “Mac 风险已摸清” 的内部结论；若要正式 Go，需补 Windows 实机或修订路线图门禁。
-3. 若继续产品化，下一步应是用户明确批准后：要么补 Windows Spike，要么批准 “Mac-first Partial → 受限 M1 计划”。
+2. 先补最少的 macOS 人工项：实体按键验证 `Control+Alt+M`，麦克风拒绝 / 恢复；系统认证框、无设备 / 断开若当前环境不可构造，保持明确 pending。
+3. 当前 Partial 只说明 Mac 核心路线证据更充分，不等于 “Mac 风险全部关闭”。
+4. 若继续产品化，下一步应由用户明确批准：补 Windows Spike，或修订门禁并采用 “Mac-first Partial → 受限 M1 计划”。

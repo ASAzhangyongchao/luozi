@@ -3,16 +3,18 @@
 - Date: 2026-07-25
 - Machine: macOS arm64
 - App version: 0.0.0 / spike/m0
+- Tested implementation commit: `cc1038b`
 - Hotkey used: Control+Alt+Space (provisional)
 - Auto evidence:
   - `tests/manual/m0-focus-auto-result.json`
   - `tests/manual/m0-delivery-auto-result.json`
+  - `tests/manual/m0-safety-extra-result.json`
 
 | Target | Overlay show/hide | Typed ABC without refocus | Focus unchanged | Click overlay steals focus? | Result | Evidence |
 |---|---|---|---|---|---|---|
-| TextEdit | pass (show/hide via hotkey + window API) | pass (`ABC`) | pass (frontmost stayed 文本编辑) | not exercised in auto probe | **pass** | auto probe `ok: true` |
+| TextEdit | pass (show/hide via hotkey + window API) | pass once (`ABC`); one setup-timing run returned `BC` | pass in both runs (frontmost stayed 文本编辑) | covered separately with Safari frontmost | **pass (focus invariant)** | latest auto probe `ok: true`; first rerun exposed input-setup timing flake |
 | Word | — | — | — | — | **n/a** | Microsoft Word not installed on this machine |
-| Chrome / Safari | pending | pending | pending | pending | **pending** | overlay ABC not auto-run; Safari used for secure-field delivery case |
+| Chrome / Safari | pass (Safari) | pass (new run appended `ABC` suffix without refocus) | pass | pass (Safari stayed frontmost after clicking overlay center) | **pass (Safari)** | `m0-safety-extra-result.json`; `m0-overlay-opaque-fallback.png` |
 | VS Code | — | — | — | — | **n/a** | VS Code not installed (JoyCode/OpenCode/Xcode present only) |
 
 ## Procedure
@@ -29,8 +31,9 @@ Pass only if overlay does not steal focus.
 ## Auto probe notes (Task 4)
 
 - Accessibility trusted for Luozi: yes.
-- First run failed typing (`b'c`) due to sticky modifiers / IME after synthesized Control+Alt+Space; probe fixed with modifier release + unicode insert.
-- Critical risk check (overlay steals frontmost): **false** on TextEdit.
+- Focus invariant remained pass on two TextEdit reruns. One run lost the initial `A` before overlay activity; the next run produced `ABC`, so the remaining flake is in fixed-delay test setup rather than observed focus stealing.
+- Critical risk check (overlay steals frontmost): **false** on TextEdit and Safari.
+- Clicking the visible 360 × 72 overlay at its center kept Safari frontmost.
 
 ## Safe delivery matrix (Task 5)
 
@@ -39,8 +42,8 @@ Pass only if overlay does not steal focus.
 | Same plain TextEdit wait 2s | `same_target`; write or unsupported fallback | `same_target` + deliver `same_target` (wrote 落字测试) | **pass** |
 | Switch app during wait | `changed`; zero insert | `changed` | **pass** |
 | Password / secure field | `secure`; zero insert | `secure` + deliver `secure` | **pass** |
-| No input focus | `unsupported` | not auto-covered yet | pending |
-| Wait mid-switch same-app other field | `changed` | not auto-covered yet | pending |
+| No input focus | `unsupported` | button remained focused; validation `same_target`; deliver `unsupported`; both text fields empty | **pass** |
+| Wait mid-switch same-app other field | `changed` | focus moved from first to second Safari field after capture; validation `changed`; both fields empty | **pass** |
 | macOS auth prompt | no body feedback | not exercised | pending |
 
-Overall auto delivery report: `ok: true` (`m0-delivery-auto-result.json`).
+Core auto delivery report: `ok: true` (`m0-delivery-auto-result.json`). Extra Safari safety cases pass in `m0-safety-extra-result.json`. macOS system authentication remains the only untested safety branch in this matrix.

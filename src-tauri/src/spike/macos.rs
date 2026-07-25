@@ -259,7 +259,13 @@ unsafe fn find_secure_in_tree(root: AXUIElementRef, depth: usize) -> Option<AXUI
 
 unsafe fn element_frame_center(element: AXUIElementRef) -> Option<(f64, f64)> {
     let pos_ref = copy_attr(element, kAXPositionAttribute).ok()?;
-    let size_ref = copy_attr(element, kAXSizeAttribute).ok()?;
+    let size_ref = match copy_attr(element, kAXSizeAttribute) {
+        Ok(v) => v,
+        Err(_) => {
+            CFRelease(pos_ref);
+            return None;
+        }
+    };
     let mut point = CGPoint::default();
     let mut size = CGSize::default();
     let ok_pos = AXValueGetType(pos_ref as AXValueRef) == kAXValueTypeCGPoint

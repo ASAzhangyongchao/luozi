@@ -98,6 +98,26 @@ fn record_blocking() -> Result<AudioProbeResult, String> {
                 )
                 .map_err(map_stream_err)?
         }
+        SampleFormat::I32 => {
+            let samples_cb = samples.clone();
+            let err_cb = err_flag.clone();
+            device
+                .build_input_stream(
+                    config,
+                    move |data: &[i32], _| {
+                        if let Ok(mut buf) = samples_cb.lock() {
+                            buf.extend(data.iter().map(|s| *s as f32 / i32::MAX as f32));
+                        }
+                    },
+                    move |err| {
+                        if let Ok(mut slot) = err_cb.lock() {
+                            *slot = Some(format!("device_disconnected: {err}"));
+                        }
+                    },
+                    None,
+                )
+                .map_err(map_stream_err)?
+        }
         SampleFormat::U16 => {
             let samples_cb = samples.clone();
             let err_cb = err_flag.clone();

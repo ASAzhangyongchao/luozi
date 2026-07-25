@@ -39,9 +39,11 @@ struct CGSize {
 }
 
 fn ensure_accessibility() -> Result<(), String> {
+    // NEVER prompt on the hot path — a modal on the AppKit main thread beachballs
+    // the app (overlay stuck, Esc dead). Tray 「权限」can open System Settings.
     unsafe {
         let key = CFString::wrap_under_get_rule(kAXTrustedCheckOptionPrompt);
-        let pairs = [(key.as_CFType(), CFBoolean::true_value().as_CFType())];
+        let pairs = [(key.as_CFType(), CFBoolean::false_value().as_CFType())];
         let dict = CFDictionary::from_CFType_pairs(&pairs);
         if AXIsProcessTrustedWithOptions(dict.as_concrete_TypeRef()) {
             Ok(())

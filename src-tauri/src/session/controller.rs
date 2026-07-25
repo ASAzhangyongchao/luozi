@@ -8,7 +8,6 @@ use luozi_core::{
 };
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 
 use crate::spike::{self, TargetToken, ValidationState};
 
@@ -20,16 +19,12 @@ use super::recorder::{SessionRecorder, MAX_RECORDING_MS};
 #[allow(dead_code)]
 pub const FAKE_TRANSCRIPT: &str = "落字测试";
 
-fn arm_escape(app: &AppHandle) {
-    if let Ok(sc) = "Escape".parse::<Shortcut>() {
-        let _ = app.global_shortcut().register(sc);
-    }
+fn arm_escape(_app: &AppHandle) {
+    // Escape is registered once at startup; keep it for the whole process life.
 }
 
-fn disarm_escape(app: &AppHandle) {
-    if let Ok(sc) = "Escape".parse::<Shortcut>() {
-        let _ = app.global_shortcut().unregister(sc);
-    }
+fn disarm_escape(_app: &AppHandle) {
+    // no-op — see arm_escape
 }
 
 pub struct AppSessionState {

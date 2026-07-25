@@ -220,12 +220,11 @@ fn register_session_shortcuts(app: &tauri::AppHandle) -> Result<String, String> 
             let state = event.state;
             match state {
                 ShortcutState::Pressed => {
-                    let token = session::controller::capture_source_token(&app);
+                    // Do NOT capture AX on this callback thread — prompt/AX work
+                    // on the main thread beachballs the app (Esc dies, overlay stuck).
                     std::thread::spawn(move || {
                         with_session(&app, |s| {
-                            if let Err(err) =
-                                session::controller::start_session_with_token(&app, s, token)
-                            {
+                            if let Err(err) = session::controller::start_session(&app, s) {
                                 eprintln!("luozi: session_start failed: {err}");
                             }
                         });
@@ -234,8 +233,6 @@ fn register_session_shortcuts(app: &tauri::AppHandle) -> Result<String, String> 
                 ShortcutState::Released if hold => {
                     std::thread::spawn(move || {
                         with_session(&app, |s| {
-                            // Wait for Pressed worker to reach Recording; stop_session
-                            // no-ops if already past recording (ASR/delivery).
                             if !session::controller::wait_until_recording(s, 2000) {
                                 eprintln!("luozi: release before recording ready");
                                 return;
@@ -254,6 +251,14 @@ fn register_session_shortcuts(app: &tauri::AppHandle) -> Result<String, String> 
                 if let Some(state) = app.try_state::<AppSessionState>() {
                     if let Ok(mut slot) = state.registered_continue.lock() {
                         *slot = Some(raw.to_string());
+                    }
+                }
+                // Escape must stay registered for the whole process — session-scoped
+                // register from a worker was racy and failed while the UI was stuck.
+                if let Ok(esc) = "Escape".parse::<Shortcut>() {
+                    match app.global_shortcut().register(esc) {
+                        Ok(()) => eprintln!("luozi: Escape armed (always-on cancel)"),
+                        Err(e) => eprintln!("luozi: Escape register failed: {e}"),
                     }
                 }
                 return Ok(raw.to_string());

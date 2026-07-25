@@ -12,7 +12,7 @@
 - Cargo: cargo 1.97.1 (c980f4866 2026-06-30)
 - Node: v20.20.2
 - npm: 10.8.2
-- Tauri: CLI 2.11.4
+- Tauri: tauri-cli 2.11.4
 
 ## Windows
 

@@ -7,7 +7,7 @@
 
 | Action | Candidate | Short 10/10 | Hold 1s 10/10 | Hold 5s 10/10 | IME | Word | Browser | VS Code | Restart | Result | Evidence |
 |---|---|---:|---:|---:|---|---|---|---|---|---|---|
-| Continue speaking | Fn | | | | | | | | | | |
+| Continue speaking | Fn | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | **fail** | Registration failed: Couldn't recognize "Fn" as a valid key (global-shortcut / muda); no low-level hook in M0 |
 | Continue speaking | Control+Alt+Space | | | | | | | | | | |
 | Continue speaking | Control+Shift+Space | | | | | | | | | | |
 | Voice edit | Control+Alt+M | | | | | | | | | | |

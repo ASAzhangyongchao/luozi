@@ -135,6 +135,11 @@ impl AsrEngine {
             .map_err(|e| format!("whisper_state_failed: {e}"))?;
 
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+        let threads = std::thread::available_parallelism()
+            .map(|n| n.get() as i32)
+            .unwrap_or(4)
+            .clamp(1, 8);
+        params.set_n_threads(threads);
         params.set_print_special(false);
         params.set_print_progress(false);
         params.set_print_realtime(false);
@@ -157,15 +162,18 @@ impl AsrEngine {
         let n = state
             .full_n_segments()
             .map_err(|e| format!("whisper_segments_failed: {e}"))?;
-        let mut text = String::new();
+        let mut parts = Vec::with_capacity(n as usize);
         for i in 0..n {
             let seg = state
                 .full_get_segment_text_lossy(i)
                 .map_err(|e| format!("whisper_segment_text_failed: {e}"))?;
-            text.push_str(seg.trim());
+            let seg = seg.trim();
+            if !seg.is_empty() {
+                parts.push(seg.to_string());
+            }
         }
 
-        let text = text.trim().to_string();
+        let text = parts.join(" ");
         if text.is_empty() {
             return Err("asr_empty_transcript".into());
         }
@@ -173,14 +181,8 @@ impl AsrEngine {
     }
 }
 
-/// Load (or reuse) engine and transcribe a capture buffer.
-pub fn transcribe_capture(
-    engine: &mut Option<AsrEngine>,
-    samples: &[f32],
-    sample_rate: u32,
-    channels: u16,
-    language: &str,
-) -> Result<String, String> {
+/// Ensure model is loaded, then take the engine out of the slot (caller must put back).
+pub fn take_ready_engine(engine: &mut Option<AsrEngine>) -> Result<AsrEngine, String> {
     let path = default_model_path();
     if engine
         .as_ref()
@@ -189,11 +191,9 @@ pub fn transcribe_capture(
     {
         *engine = Some(AsrEngine::load(&path)?);
     }
-    let pcm = resample_to_16k_mono(samples, sample_rate, channels);
     engine
-        .as_ref()
-        .expect("engine just loaded")
-        .transcribe(&pcm, language)
+        .take()
+        .ok_or_else(|| "asr_engine_missing".to_string())
 }
 
 #[cfg(test)]

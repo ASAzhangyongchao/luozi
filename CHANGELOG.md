@@ -16,10 +16,10 @@
 
 ### Fixed
 
-- Continue-speaking hotkey no longer deadlocks the AppKit main thread (beachball on press)
-- Accessibility capture falls back to NSWorkspace frontmost app when `AXFocusedApplication` has no value
-- Clipboard delivery synthesizes ⌘V so transcript can land at the caret without AX set-value
-- Docs clarify that `Luozi.app` and `target/debug/luozi` are different TCC identities
+- Duplicate stop during ASR no longer cancels in-flight Whisper (Released / auto-stop races)
+- ASR no longer holds the engine mutex across multi-second `full()`; Esc can mark stale
+- Empty mic buffers fail early; multi-segment transcripts join with spaces
+- Tray shows model-missing until `ggml-small.bin` is present
 
 ### Notes
 

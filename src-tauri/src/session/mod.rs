@@ -1,6 +1,6 @@
 //! Product session path (M2+): recorder, clipboard undo, controller, local ASR.
 
-mod asr;
+pub mod asr;
 mod clipboard;
 pub mod controller;
 mod recorder;

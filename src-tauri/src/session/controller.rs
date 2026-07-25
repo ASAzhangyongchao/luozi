@@ -271,18 +271,32 @@ fn write_clipboard(app: &AppHandle, state: &AppSessionState, text: &str) -> bool
 pub fn wait_until_recording(state: &AppSessionState, timeout_ms: u64) -> bool {
     let steps = (timeout_ms / 50).max(1);
     for _ in 0..steps {
-        let recording = state
-            .machine
-            .lock()
-            .ok()
-            .map(|m| matches!(m.phase(), SessionPhase::Recording { .. }))
-            .unwrap_or(false);
-        if recording {
+        if is_recording_phase(state) {
             return true;
         }
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
     false
+}
+
+pub fn is_recording_phase(state: &AppSessionState) -> bool {
+    state
+        .machine
+        .lock()
+        .ok()
+        .map(|m| m.is_recording())
+        .unwrap_or(false)
+}
+
+fn fail_transcribe(app: &AppHandle, state: &AppSessionState, err: String) -> Result<SessionStatus, String> {
+    let _ = state
+        .machine
+        .lock()
+        .map(|mut m| m.handle(SessionCommand::Cancel));
+    disarm_escape(app);
+    show_overlay(app, false);
+    emit_phase(app, "error", &err);
+    Err(err)
 }
 
 pub fn start_session(app: &AppHandle, state: &AppSessionState) -> Result<SessionStatus, String> {
@@ -338,12 +352,14 @@ pub fn start_session_with_token(
                 let Some(state) = app_handle.try_state::<AppSessionState>() else {
                     return;
                 };
-                let active = state
+                // Only auto-stop while still Recording — never cancel in-flight ASR.
+                let should_stop = state
                     .machine
                     .lock()
                     .ok()
-                    .and_then(|m| m.active_session_id());
-                if active == Some(sid) {
+                    .and_then(|m| m.recording_session_id())
+                    == Some(sid);
+                if should_stop {
                     let _ = stop_session(&app_handle, &state);
                 }
             });
@@ -359,6 +375,12 @@ pub fn start_session_with_token(
 }
 
 pub fn stop_session(app: &AppHandle, state: &AppSessionState) -> Result<SessionStatus, String> {
+    // Duplicate Released / race after ASR started: ignore without Cancel.
+    if !is_recording_phase(state) {
+        eprintln!("luozi: stop ignored (not recording)");
+        return status_from(state, "stop_ignored".into());
+    }
+
     let duration_ms = state
         .recorder
         .lock()
@@ -372,6 +394,10 @@ pub fn stop_session(app: &AppHandle, state: &AppSessionState) -> Result<SessionS
         .stop()
     {
         Ok(a) => Some(a),
+        Err(err) if err == "not_recording" => {
+            eprintln!("luozi: stop not_recording (no cancel)");
+            return status_from(state, "stop_ignored".into());
+        }
         Err(err) => {
             let _ = cancel_session(app, state);
             return Err(err);
@@ -396,32 +422,46 @@ pub fn stop_session(app: &AppHandle, state: &AppSessionState) -> Result<SessionS
         SessionEffect::BeginTranscribe { session_id } => {
             emit_phase(app, "transcribing", "落字中");
             let language = state.config.language.clone();
-            let transcript = {
-                let capture = audio.ok_or_else(|| "asr_no_audio".to_string())?;
-                let mut engine = state.asr.lock().map_err(|_| "asr_lock_failed")?;
-                match asr::transcribe_capture(
-                    &mut engine,
-                    &capture.samples,
-                    capture.sample_rate,
-                    capture.channels,
-                    &language,
-                ) {
-                    Ok(text) => {
-                        eprintln!("luozi: asr ok → {text}");
-                        text
+            let Some(capture) = audio else {
+                return fail_transcribe(app, state, "asr_no_audio".into());
+            };
+
+            // Take Whisper engine under a short lock; run infer without holding it.
+            let engine = {
+                let mut slot = match state.asr.lock() {
+                    Ok(g) => g,
+                    Err(_) => {
+                        return fail_transcribe(app, state, "asr_lock_failed".into());
                     }
+                };
+                match asr::take_ready_engine(&mut slot) {
+                    Ok(e) => e,
                     Err(err) => {
-                        eprintln!("luozi: asr failed: {err}");
-                        let _ = state.machine.lock().map(|mut m| {
-                            m.handle(SessionCommand::Cancel);
-                        });
-                        disarm_escape(app);
-                        show_overlay(app, false);
-                        emit_phase(app, "error", &err);
-                        return Err(err);
+                        drop(slot);
+                        return fail_transcribe(app, state, err);
                     }
                 }
             };
+
+            let pcm = asr::resample_to_16k_mono(
+                &capture.samples,
+                capture.sample_rate,
+                capture.channels,
+            );
+            let transcript = match engine.transcribe(&pcm, &language) {
+                Ok(text) => {
+                    eprintln!("luozi: asr ok → {text}");
+                    text
+                }
+                Err(err) => {
+                    eprintln!("luozi: asr failed: {err}");
+                    let _ = state.asr.lock().map(|mut s| *s = Some(engine));
+                    return fail_transcribe(app, state, err);
+                }
+            };
+            let _ = state.asr.lock().map(|mut s| *s = Some(engine));
+
+            // User may have Esc-cancelled during infer → stale delivery.
             let deliver_effect = {
                 let mut machine = state.machine.lock().map_err(|_| "session_lock_failed")?;
                 machine.handle(SessionCommand::TranscriptionReady {
@@ -432,7 +472,6 @@ pub fn stop_session(app: &AppHandle, state: &AppSessionState) -> Result<SessionS
             match deliver_effect {
                 SessionEffect::Deliver { session_id, text } => {
                     eprintln!("luozi: delivering transcript ({duration_ms}ms hold)");
-                    // Hide overlay first so the source app keeps / regains key focus for paste.
                     disarm_escape(app);
                     show_overlay(app, false);
                     std::thread::sleep(std::time::Duration::from_millis(80));
@@ -447,6 +486,7 @@ pub fn stop_session(app: &AppHandle, state: &AppSessionState) -> Result<SessionS
                     }
                 }
                 SessionEffect::StaleIgnored { .. } => {
+                    eprintln!("luozi: transcript stale (canceled during ASR)");
                     disarm_escape(app);
                     show_overlay(app, false);
                     status_from(state, "stale".into())

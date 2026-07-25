@@ -82,6 +82,18 @@ impl SessionMachine {
         }
     }
 
+    /// Only while the mic is open — not during ASR/delivery.
+    pub fn recording_session_id(&self) -> Option<SessionId> {
+        match self.phase {
+            SessionPhase::Recording { session_id } => Some(session_id),
+            _ => None,
+        }
+    }
+
+    pub fn is_recording(&self) -> bool {
+        self.recording_session_id().is_some()
+    }
+
     pub fn handle(&mut self, cmd: SessionCommand) -> SessionEffect {
         match cmd {
             SessionCommand::Start => self.on_start(),
@@ -269,5 +281,17 @@ mod tests {
             SessionEffect::StaleIgnored { session_id: 0 }
         );
         assert!(m.is_idle());
+    }
+
+    #[test]
+    fn recording_session_id_only_while_recording() {
+        let mut m = SessionMachine::new();
+        assert!(m.recording_session_id().is_none());
+        let _ = m.handle(SessionCommand::Start);
+        assert_eq!(m.recording_session_id(), Some(0));
+        let _ = m.handle(SessionCommand::Stop { duration_ms: 500 });
+        assert!(!m.is_recording());
+        assert_eq!(m.active_session_id(), Some(0));
+        assert!(m.recording_session_id().is_none());
     }
 }

@@ -50,14 +50,14 @@ where
 fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let cfg = AppConfig::default();
 
+    let model_ready = session::asr::default_model_path().is_file();
+    let status_label = if model_ready {
+        "Whisper 就绪 · 快捷键临时"
+    } else {
+        "模型未就绪 · 运行 npm run fetch:model"
+    };
     let title = MenuItem::with_id(app, "title", "落字", false, None::<&str>)?;
-    let status = MenuItem::with_id(
-        app,
-        "status",
-        "Whisper 就绪 · 快捷键临时",
-        false,
-        None::<&str>,
-    )?;
+    let status = MenuItem::with_id(app, "status", status_label, false, None::<&str>)?;
     let sep_status = PredefinedMenuItem::separator(app)?;
 
     let start = MenuItem::with_id(
@@ -79,13 +79,12 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let undo = MenuItem::with_id(app, "undo", "撤销上次落字", true, None::<&str>)?;
     let sep_actions = PredefinedMenuItem::separator(app)?;
 
-    let engine = MenuItem::with_id(
-        app,
-        "engine",
-        "引擎：本地 Whisper（M3）",
-        false,
-        None::<&str>,
-    )?;
+    let engine_label = if model_ready {
+        "引擎：本地 Whisper（M3）"
+    } else {
+        "引擎：模型未安装"
+    };
+    let engine = MenuItem::with_id(app, "engine", engine_label, false, None::<&str>)?;
     let mode_label = if cfg.hold_to_talk {
         "录音模式：按住说话"
     } else {
@@ -235,8 +234,11 @@ fn register_session_shortcuts(app: &tauri::AppHandle) -> Result<String, String> 
                 ShortcutState::Released if hold => {
                     std::thread::spawn(move || {
                         with_session(&app, |s| {
+                            // Wait for Pressed worker to reach Recording; stop_session
+                            // no-ops if already past recording (ASR/delivery).
                             if !session::controller::wait_until_recording(s, 2000) {
                                 eprintln!("luozi: release before recording ready");
+                                return;
                             }
                             if let Err(err) = session::controller::stop_session(&app, s) {
                                 eprintln!("luozi: session_stop failed: {err}");

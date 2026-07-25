@@ -101,9 +101,9 @@ impl SessionRecorder {
             .lock()
             .map_err(|_| "sample_buffer_lock_failed".to_string())?
             .clone();
-        // M2 uses a fake transcript; empty buffers (mic prompt / silent) must not abort delivery.
+        // M3: empty capture must fail early (mic permission / silent), not enter ASR.
         if data.is_empty() {
-            eprintln!("luozi: recorder empty samples — continuing (M2 fake transcript)");
+            return Err("permission_or_silent_capture".into());
         }
 
         let frames = data.len() / active.channels.max(1) as usize;

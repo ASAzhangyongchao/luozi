@@ -1,43 +1,29 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <link rel="stylesheet" href="/src/styles.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Tauri App</title>
-    <script type="module" src="/src/main.ts" defer></script>
+    <title>Luozi M0</title>
   </head>
-
   <body>
     <main class="container">
-      <h1>Welcome to Tauri</h1>
-
-      <div class="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/src/assets/vite.svg" class="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img
-            src="/src/assets/tauri.svg"
-            class="logo tauri"
-            alt="Tauri logo"
-          />
-        </a>
-        <a href="https://www.typescriptlang.org/docs" target="_blank">
-          <img
-            src="/src/assets/typescript.svg"
-            class="logo typescript"
-            alt="typescript logo"
-          />
-        </a>
+      <h1>Luozi M0 · Hotkey Probe</h1>
+      <p>一次只注册一个候选键。真实事件比注册状态更可信。</p>
+      <label for="shortcut">Candidate</label>
+      <select id="shortcut">
+        <option>Fn</option>
+        <option>Control+Alt+Space</option>
+        <option>Control+Shift+Space</option>
+        <option>Control+Alt+M</option>
+        <option>Control+Shift+M</option>
+      </select>
+      <div class="actions">
+        <button id="register" type="button">Register</button>
+        <button id="clear" type="button">Unregister all</button>
       </div>
-      <p>Click on the Tauri logo to learn more about the framework</p>
-
-      <form class="row" id="greet-form">
-        <input id="greet-input" placeholder="Enter a name..." />
-        <button type="submit">Greet</button>
-      </form>
-      <p id="greet-msg"></p>
+      <p id="status">Not registered</p>
+      <pre id="events" aria-live="polite"></pre>
     </main>
+    <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

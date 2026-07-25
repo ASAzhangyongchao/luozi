@@ -20,9 +20,15 @@
       <div class="actions">
         <button id="register" type="button">Register</button>
         <button id="clear" type="button">Unregister all</button>
+        <button id="autoFocus" type="button">自动测焦点</button>
       </div>
       <p id="status">Not registered</p>
+      <h2>Events</h2>
       <pre id="events" aria-live="polite"></pre>
+      <h2>Focus probe</h2>
+      <pre id="focusReport" aria-live="polite"></pre>
+      <h2>Target / delivery</h2>
+      <pre id="deliveryReport" aria-live="polite"></pre>
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>

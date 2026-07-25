@@ -1,0 +1,14 @@
+{
+  "ok": true,
+  "accessibilityTrusted": true,
+  "textEditActivated": true,
+  "typedValue": "ABC",
+  "expectedValue": "ABC",
+  "overlayShowStoleFrontmost": false,
+  "frontmostBeforeOverlay": "文本编辑",
+  "frontmostDuringOverlay": "文本编辑",
+  "frontmostAfterOverlay": "文本编辑",
+  "typingOk": true,
+  "focusOk": true,
+  "message": "pass: TextEdit kept focus; value contains ABC"
+}

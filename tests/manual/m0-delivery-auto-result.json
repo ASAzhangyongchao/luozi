@@ -1,0 +1,30 @@
+{
+  "ok": true,
+  "cases": [
+    {
+      "name": "same_plain_textedit_2s",
+      "expected": "same_target(+write|unsupported_fallback)",
+      "actual": "same_target",
+      "delivered": "same_target",
+      "pass": true,
+      "detail": "role=AXTextArea secure=false"
+    },
+    {
+      "name": "switch_app_during_wait",
+      "expected": "changed",
+      "actual": "changed",
+      "delivered": null,
+      "pass": true,
+      "detail": "after switch validate=changed"
+    },
+    {
+      "name": "password_field_secure",
+      "expected": "secure",
+      "actual": "secure",
+      "delivered": "secure",
+      "pass": true,
+      "detail": "element=pid=19221;role=AXTextField;subrole=AXSecureTextField;id=;p=200.0,200.0;s=349.0x56.0"
+    }
+  ],
+  "message": "pass: delivery safety matrix"
+}

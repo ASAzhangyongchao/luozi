@@ -2,6 +2,8 @@
 
 ## Git
 
+- Product root: `/Users/zhangyongchao/knowledge-system/apps/luozi` (moved from `~/project/luozi`)
+
 - Baseline commit: 9b58df0a8c6297e49b2f77073baf26732cb5acfb
 
 ## macOS

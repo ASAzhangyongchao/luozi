@@ -136,6 +136,11 @@ fn settings_open_spike(app: tauri::AppHandle) {
 }
 
 #[tauri::command]
+fn open_settings_window(app: tauri::AppHandle, section: Option<String>) {
+    show_settings(&app, section.as_deref().or(Some("general")));
+}
+
+#[tauri::command]
 fn settings_take_nav() -> Option<String> {
     session::settings_api::take_pending_section()
 }
@@ -180,6 +185,14 @@ fn show_spike(app: &tauri::AppHandle) {
 
 fn show_about(app: &tauri::AppHandle) {
     show_settings(app, Some("about"));
+}
+
+fn show_guide(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("guide") {
+        let _ = window.set_title("落字 · 如何使用");
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
 }
 
 fn with_session<F>(app: &tauri::AppHandle, f: F)
@@ -254,6 +267,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     )?;
     let sep_prefs = PredefinedMenuItem::separator(app)?;
 
+    let guide = MenuItem::with_id(app, "guide", "如何使用…", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", "设置…", true, None::<&str>)?;
     let about = MenuItem::with_id(app, "about", "关于落字", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "退出落字", true, None::<&str>)?;
@@ -274,6 +288,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             &asr_mode,
             &fetch_model,
             &sep_prefs,
+            &guide,
             &settings,
             &about,
             &quit,
@@ -286,6 +301,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         .tooltip("落字 Luozi")
         .on_menu_event(|app, event| match event.id.as_ref() {
             "draft" => show_draft(app),
+            "guide" => show_guide(app),
             "settings" => show_settings(app, Some("general")),
             "about" => show_about(app),
             "start" => with_session(app, |s| {
@@ -536,6 +552,12 @@ pub fn run() {
             if let Some(settings) = app.get_webview_window("settings") {
                 let _ = settings.hide();
             }
+            if let Some(guide) = app.get_webview_window("guide") {
+                let _ = guide.set_background_color(Some(tauri::window::Color(
+                    0xf4, 0xfb, 0xfa, 0xff,
+                )));
+                let _ = guide.hide();
+            }
             if let Some(overlay) = app.get_webview_window("overlay") {
                 // Clear plate so CSS border-radius does not sit on a white window.
                 let _ = overlay.set_background_color(Some(tauri::window::Color(0, 0, 0, 0)));
@@ -665,6 +687,9 @@ pub fn run() {
                 } else if window.label() == "settings" {
                     api.prevent_close();
                     let _ = window.hide();
+                } else if window.label() == "guide" {
+                    api.prevent_close();
+                    let _ = window.hide();
                 }
             }
         })
@@ -696,6 +721,7 @@ pub fn run() {
             settings_open_repo,
             settings_open_releases,
             settings_open_spike,
+            open_settings_window,
             settings_take_nav,
             run_focus_abc_probe,
             run_delivery_matrix_probe,

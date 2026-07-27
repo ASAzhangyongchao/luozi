@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Luozi main window capability",
-  "windows": ["main", "overlay", "settings"],
+  "windows": ["main", "overlay", "settings", "guide"],
   "permissions": [
     "core:default",
     "core:event:default",

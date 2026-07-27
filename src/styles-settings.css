@@ -1,4 +1,6 @@
 :root {
+  /* Force light plate so dark-mode OS chrome does not bleed into rounded corners. */
+  color-scheme: light;
   /* Align with draft / Falling Cursor tokens */
   --night-teal: #0b3034;
   --aurora-cyan: #42d9d3;
@@ -22,17 +24,6 @@
     system-ui,
     sans-serif;
   line-height: 1.55;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0a1f22;
-    --panel: color-mix(in srgb, #122f33 88%, transparent);
-    --line: color-mix(in srgb, var(--ice-white) 14%, transparent);
-    --text: var(--ice-white);
-    --muted: color-mix(in srgb, var(--ice-white) 62%, transparent);
-    --accent: var(--aurora-cyan);
-  }
 }
 
 * {
@@ -100,12 +91,6 @@ body.settings-body {
   color: var(--night-teal);
 }
 
-@media (prefers-color-scheme: dark) {
-  .settings-section h1 {
-    color: var(--ice-white);
-  }
-}
-
 .settings-section h2 {
   margin: 22px 0 10px;
   font-size: 15px;
@@ -147,13 +132,6 @@ button {
   padding: 7px 12px;
   font-size: 13px;
   cursor: pointer;
-}
-
-@media (prefers-color-scheme: dark) {
-  button {
-    border-color: color-mix(in srgb, var(--ice-white) 18%, transparent);
-    background: color-mix(in srgb, #1a3a3e 70%, transparent);
-  }
 }
 
 button:hover:not(:disabled) {
@@ -219,4 +197,64 @@ ul.plain {
   min-height: 1.2em;
   color: var(--accent);
   font-size: 13px;
+}
+
+.guide-shell {
+  min-height: 100vh;
+}
+
+.guide-column {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 100vh;
+}
+
+.guide-column .settings-main {
+  flex: 1;
+}
+
+.guide-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 28px 16px;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.guide-footer button {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.guide-footer button:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: color-mix(in srgb, var(--accent) 10%, #fff);
+}
+
+.settings-section ol.guide-steps,
+.settings-section ul.guide-list {
+  margin: 0 0 14px;
+  padding-left: 1.25rem;
+}
+
+.settings-section ol.guide-steps li,
+.settings-section ul.guide-list li {
+  margin: 0.45rem 0;
+}
+
+.settings-section kbd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  background: #fff;
 }

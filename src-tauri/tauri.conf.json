@@ -44,6 +44,15 @@
         "height": 560,
         "visible": false,
         "skipTaskbar": true
+      },
+      {
+        "label": "guide",
+        "title": "落字 · 如何使用",
+        "url": "guide.html",
+        "width": 720,
+        "height": 560,
+        "visible": false,
+        "skipTaskbar": true
       }
     ],
     "security": {

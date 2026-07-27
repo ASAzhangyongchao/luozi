@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>落字 · 如何使用</title>
+  </head>
+  <body class="settings-body">
+    <div class="settings-shell guide-shell">
+      <nav class="settings-nav" aria-label="教程章节">
+        <button type="button" class="nav-item active" data-section="start">快速开始</button>
+        <button type="button" class="nav-item" data-section="hotkeys">快捷键</button>
+        <button type="button" class="nav-item" data-section="draft">语音草稿</button>
+        <button type="button" class="nav-item" data-section="voice-edit">说出修改</button>
+        <button type="button" class="nav-item" data-section="settings">设置与权限</button>
+        <button type="button" class="nav-item" data-section="faq">常见问题</button>
+      </nav>
+      <div class="guide-column">
+        <main class="settings-main">
+          <section id="section-start" class="settings-section">
+            <h1>快速开始</h1>
+            <ol class="guide-steps">
+              <li>把落字装到 <code>/Applications</code>（开发可用 <code>npm run install:macos-app</code>）。</li>
+              <li>菜单栏出现落字图标后，<strong>右键</strong>打开托盘菜单（左键暂不是产品入口）。</li>
+              <li>打开「设置…」→「权限」，允许麦克风与辅助功能。</li>
+              <li>按住 <kbd>Control+Alt+Space</kbd> 说话，松手后开始转写。</li>
+              <li>若「语音草稿」窗在前台且有焦点 → 文字写入草稿；否则尝试插入到当前 App，失败则复制到剪贴板。</li>
+            </ol>
+            <p class="muted">云端能力需自备 Key，并在设置里单独同意上传。默认优先本地转写。</p>
+          </section>
+          <section id="section-hotkeys" class="settings-section" hidden>
+            <h1>快捷键</h1>
+            <ul class="guide-list">
+              <li><kbd>Control+Alt+Space</kbd>（按住）：语音输入 → 草稿或落字</li>
+              <li><kbd>Control+Alt+Shift+Space</kbd>（按住）：说出修改要求 → 改草稿</li>
+              <li><kbd>Escape</kbd>：取消当前录音 / 会话</li>
+            </ul>
+            <p>交互是<strong>按住说话，松手处理</strong>，不是点一下开关。</p>
+            <p class="muted">上表为默认组合。若你改过键，以「设置 → 快捷键」显示为准。</p>
+          </section>
+          <section id="section-draft" class="settings-section" hidden>
+            <h1>语音草稿</h1>
+            <ul class="guide-list">
+              <li>托盘「打开语音草稿」进入工作台。</li>
+              <li>草稿有焦点时，语音结果写入正文；约 1 秒自动保存；关闭窗口会隐藏到托盘，内容仍在。</li>
+              <li>支持撤销 / 重做、复制为纯文本、清空（清空需确认）。</li>
+              <li>空草稿时可载入「最近落字」（短时间内外部落字成功后可用）。</li>
+            </ul>
+          </section>
+          <section id="section-voice-edit" class="settings-section" hidden>
+            <h1>说出修改</h1>
+            <ol class="guide-steps">
+              <li>先打开语音草稿，并保证正文里已有内容。</li>
+              <li>在设置里配置<strong>文本 AI</strong> Key，并同意上传正文（与 ASR 分开）。</li>
+              <li>按住 <kbd>Control+Alt+Shift+Space</kbd>，口头说修改要求，松手后模型改写草稿范围。</li>
+              <li>进度与结果看屏幕 HUD / 草稿状态；失败时检查 Key、同意与网络。</li>
+            </ol>
+          </section>
+          <section id="section-settings" class="settings-section" hidden>
+            <h1>设置与权限</h1>
+            <ul class="guide-list">
+              <li><strong>引擎模式</strong>：自动 / 仅本地 / 仅云端（在设置里弹窗选择）。</li>
+              <li><strong>本地模型</strong>：托盘「下载推荐模型…」；就绪后可不依赖云端转写。</li>
+              <li><strong>云端 ASR / 文本 AI</strong>：分项配置 Key 与同意；厂商以设置页可选列表为准（如 Groq、千问、豆包、小米等）。</li>
+              <li><strong>麦克风</strong>：录音必需。</li>
+              <li><strong>辅助功能</strong>：向其他 App 插入文字；未授权时降级为剪贴板。</li>
+            </ul>
+            <p class="muted">ad-hoc 重装后签名变化，辅助功能里可能需要关掉再打开一次「落字」。</p>
+            <p>点窗口底部「打开设置…」可直接进入设置。</p>
+          </section>
+          <section id="section-faq" class="settings-section" hidden>
+            <h1>常见问题</h1>
+            <ul class="guide-list">
+              <li><strong>辅助功能未生效？</strong>到系统设置检查；重装后开关一次「落字」。</li>
+              <li><strong>没有本地模型？</strong>可先配云端 ASR，或下载推荐模型。</li>
+              <li><strong>文字没进别人的 App？</strong>多半是辅助功能未授权，请到剪贴板粘贴。</li>
+              <li><strong>没有首次引导？</strong>随时从托盘「如何使用…」打开本教程。</li>
+              <li><strong>正式安装包？</strong>当前以开发安装路径为准；Release / 公证后续再做。</li>
+            </ul>
+          </section>
+        </main>
+        <footer class="guide-footer">
+          <button type="button" id="btnOpenSettings">打开设置…</button>
+        </footer>
+      </div>
+    </div>
+    <script type="module" src="/src/guide.ts"></script>
+  </body>
+</html>

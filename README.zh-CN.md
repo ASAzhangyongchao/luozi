@@ -8,7 +8,7 @@
 
 - 按住 `Control+Alt+Space`：转写 → 工作台焦点则写入草稿，否则 AX / 剪贴板
 - 按住 `Control+Alt+Shift+Space`：说修改要求 → 文本 AI 改草稿
-- 托盘：**设置…**、**如何使用…**、关于、打开语音草稿、引擎模式、Key/同意、下载模型
+- 托盘：**左键**打开语音草稿；**右键**菜单含设置 / 如何使用 / 引擎等。点 Dock 图标同样打开草稿。
 - 手工验收：`docs/spikes/m5-manual.md` … `m8-manual.md`、`guide-manual.md`
 
 **云端：** ASR 与文本 AI 分开授权；Key 只进钥匙串。

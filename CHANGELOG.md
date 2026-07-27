@@ -4,6 +4,7 @@
 
 ### Added
 
+- Tray left-click and Dock reopen open the voice draft workbench (right-click menu unchanged for Settings / How to use)
 - In-app beginner guide window from tray 「如何使用…」 (chaptered: start / hotkeys / draft / voice edit / settings / FAQ)
 - M8 settings shell (Mac shortest): dedicated Settings window (general / voice+AI / hotkeys read-only / permissions / about); tray Settings & About enabled; Spike demoted to developer entry
 - M7 voice edit (Mac shortest): second hotkey `Control+Alt+Shift+Space`, separate text-AI Keychain + consent, OpenAI-compatible chat rewrite, selection/paragraph scope, protected-token high-risk confirm

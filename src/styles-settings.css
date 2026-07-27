@@ -1,4 +1,6 @@
 :root {
+  /* Force light plate so dark-mode OS chrome does not bleed into rounded corners. */
+  color-scheme: light;
   /* Align with draft / Falling Cursor tokens */
   --night-teal: #0b3034;
   --aurora-cyan: #42d9d3;

@@ -10,6 +10,7 @@ use spike::{
     capture_target, deliver_probe, record_one_second_probe, run_delivery_matrix_probe,
     run_focus_abc_probe, run_overlay_cycle_probe, validate_target,
 };
+use std::time::Duration;
 use tauri::{
     image::Image,
     menu::{Menu, MenuItem, PredefinedMenuItem},
@@ -134,6 +135,11 @@ fn settings_open_spike(app: tauri::AppHandle) {
     show_spike(&app);
 }
 
+#[tauri::command]
+fn settings_take_nav() -> Option<String> {
+    session::settings_api::take_pending_section()
+}
+
 fn show_draft(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.set_title("落字 · 语音草稿");
@@ -144,11 +150,21 @@ fn show_draft(app: &tauri::AppHandle) {
 }
 
 fn show_settings(app: &tauri::AppHandle, section: Option<&str>) {
+    if let Some(sec) = section {
+        session::settings_api::set_pending_section(sec);
+    }
     if let Some(window) = app.get_webview_window("settings") {
         let _ = window.show();
         let _ = window.set_focus();
         if let Some(sec) = section {
-            let _ = window.emit("settings://nav", serde_json::json!({ "section": sec }));
+            let app2 = app.clone();
+            let sec = sec.to_string();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(120));
+                if let Some(w) = app2.get_webview_window("settings") {
+                    let _ = w.emit("settings://nav", serde_json::json!({ "section": sec }));
+                }
+            });
         }
     }
 }
@@ -236,41 +252,9 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         true,
         None::<&str>,
     )?;
-    let groq_key = MenuItem::with_id(app, "groq_key", "配置 Groq ASR Key…", true, None::<&str>)?;
-    let groq_consent = MenuItem::with_id(
-        app,
-        "groq_consent",
-        "同意 ASR 上传到 Groq…",
-        true,
-        None::<&str>,
-    )?;
-    let text_ai_key = MenuItem::with_id(
-        app,
-        "text_ai_key",
-        "配置文本 AI Key…",
-        true,
-        None::<&str>,
-    )?;
-    let text_ai_consent = MenuItem::with_id(
-        app,
-        "text_ai_consent",
-        "同意文本 AI 上传…",
-        true,
-        None::<&str>,
-    )?;
-    let mode_label = if cfg.hold_to_talk {
-        "录音模式：按住说话"
-    } else {
-        "录音模式：按一下开关"
-    };
-    let mode = MenuItem::with_id(app, "mode", mode_label, false, None::<&str>)?;
     let sep_prefs = PredefinedMenuItem::separator(app)?;
 
-    let practice = MenuItem::with_id(app, "practice", "开发 Spike…", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", "设置…", true, None::<&str>)?;
-    let perms = MenuItem::with_id(app, "perms", "检查权限…", true, None::<&str>)?;
-    let sep_footer = PredefinedMenuItem::separator(app)?;
-
     let about = MenuItem::with_id(app, "about", "关于落字", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "退出落字", true, None::<&str>)?;
 
@@ -289,16 +273,8 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             &engine,
             &asr_mode,
             &fetch_model,
-            &groq_key,
-            &groq_consent,
-            &text_ai_key,
-            &text_ai_consent,
-            &mode,
             &sep_prefs,
             &settings,
-            &perms,
-            &practice,
-            &sep_footer,
             &about,
             &quit,
         ],
@@ -309,7 +285,6 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .tooltip("落字 Luozi")
         .on_menu_event(|app, event| match event.id.as_ref() {
-            "practice" => show_spike(app),
             "draft" => show_draft(app),
             "settings" => show_settings(app, Some("general")),
             "about" => show_about(app),
@@ -337,31 +312,6 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
                     eprintln!("luozi: cycle asr mode failed: {err}");
                 }
             }
-            "groq_key" => {
-                if let Err(err) = session::controller::prompt_and_store_groq_key(app) {
-                    if err != "canceled" {
-                        eprintln!("luozi: groq key failed: {err}");
-                    }
-                }
-            }
-            "groq_consent" => {
-                if let Err(err) = session::controller::consent_current_cloud(app) {
-                    eprintln!("luozi: consent failed: {err}");
-                }
-            }
-            "text_ai_key" => {
-                if let Err(err) = session::controller::prompt_and_store_text_ai_key(app) {
-                    if err != "canceled" {
-                        eprintln!("luozi: text ai key failed: {err}");
-                    }
-                }
-            }
-            "text_ai_consent" => {
-                if let Err(err) = session::controller::consent_current_text_ai(app) {
-                    eprintln!("luozi: text ai consent failed: {err}");
-                }
-            }
-            "perms" => show_settings(app, Some("permissions")),
             "quit" => app.exit(0),
             _ => {}
         })
@@ -746,6 +696,7 @@ pub fn run() {
             settings_open_repo,
             settings_open_releases,
             settings_open_spike,
+            settings_take_nav,
             run_focus_abc_probe,
             run_delivery_matrix_probe,
             run_overlay_cycle_probe,

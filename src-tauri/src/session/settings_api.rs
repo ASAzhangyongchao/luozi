@@ -1,4 +1,4 @@
-//! Aggregated settings snapshot + helpers for the settings window (M8).
+use std::sync::Mutex;
 
 use luozi_core::AppConfig;
 use serde::Serialize;
@@ -11,6 +11,18 @@ use super::text_ai;
 
 pub const GITHUB_REPO_URL: &str = "https://github.com/ASAzhangyongchao/luozi";
 pub const GITHUB_RELEASES_URL: &str = "https://github.com/ASAzhangyongchao/luozi/releases";
+
+static PENDING_SECTION: Mutex<Option<String>> = Mutex::new(None);
+
+pub fn set_pending_section(section: &str) {
+    if let Ok(mut g) = PENDING_SECTION.lock() {
+        *g = Some(section.to_string());
+    }
+}
+
+pub fn take_pending_section() -> Option<String> {
+    PENDING_SECTION.lock().ok().and_then(|mut g| g.take())
+}
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

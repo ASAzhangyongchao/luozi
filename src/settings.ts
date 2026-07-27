@@ -186,7 +186,13 @@ async function main() {
   });
 
   const params = new URLSearchParams(location.search);
-  const initial = params.get("section") || "general";
+  let initial = params.get("section") || "general";
+  try {
+    const pending = await invoke<string | null>("settings_take_nav");
+    if (pending) initial = pending;
+  } catch {
+    /* ignore */
+  }
   showSection(initial);
 
   await refresh();

@@ -2,6 +2,9 @@
   --night-teal: #0b3034;
   --aurora-cyan: #42d9d3;
   --ice-white: #f4fbfa;
+  --amber: #e8a54b;
+  --risk-red: #e85d5d;
+  --electric-blue: #6c8eff;
   color: var(--night-teal);
   font-family:
     "PingFang SC",
@@ -99,6 +102,61 @@ body {
   100% {
     box-shadow: 0 0 0 0 color-mix(in srgb, var(--aurora-cyan) 0%, transparent);
   }
+}
+
+/* Voice-edit: electric blue accent */
+.overlay[data-phase="recording_edit"] {
+  border-color: color-mix(in srgb, var(--electric-blue) 55%, transparent);
+}
+.overlay[data-phase="recording_edit"] .pulse,
+.overlay[data-phase="recording_edit"] .mark .dot {
+  background: var(--electric-blue);
+  fill: var(--electric-blue);
+}
+.overlay[data-phase="recording_edit"] .mark .arc {
+  stroke: var(--electric-blue);
+}
+.overlay[data-phase="recording_edit"] .pulse {
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--electric-blue) 55%, transparent);
+  animation-name: edit-pulse;
+}
+
+@keyframes edit-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--electric-blue) 50%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 10px color-mix(in srgb, var(--electric-blue) 0%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--electric-blue) 0%, transparent);
+  }
+}
+
+/* High-risk confirm: amber */
+.overlay[data-phase="confirm"],
+.overlay[data-phase="warn"] {
+  border-color: color-mix(in srgb, var(--amber) 60%, transparent);
+}
+.overlay[data-phase="confirm"] .pulse,
+.overlay[data-phase="warn"] .pulse {
+  background: var(--amber);
+  animation: none;
+  box-shadow: none;
+}
+
+/* Errors / rejects: risk red */
+.overlay[data-phase="error"],
+.overlay[data-phase="rejected"],
+.overlay[data-phase="discarded"] {
+  border-color: color-mix(in srgb, var(--risk-red) 65%, transparent);
+}
+.overlay[data-phase="error"] .pulse,
+.overlay[data-phase="rejected"] .pulse,
+.overlay[data-phase="discarded"] .pulse {
+  background: var(--risk-red);
+  animation: none;
+  box-shadow: none;
 }
 
 @media (prefers-reduced-transparency: reduce) {

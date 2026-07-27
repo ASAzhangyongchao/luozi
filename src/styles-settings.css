@@ -1,23 +1,37 @@
 :root {
-  color-scheme: light dark;
-  --bg: #f4f6f8;
-  --panel: #ffffffcc;
-  --line: #d7dde3;
-  --text: #1c2430;
-  --muted: #5c6b7a;
-  --accent: #0f8f8a;
+  /* Align with draft / Falling Cursor tokens */
+  --night-teal: #0b3034;
+  --aurora-cyan: #42d9d3;
+  --ice-white: #f4fbfa;
+  --amber: #e8a54b;
+  --risk-red: #e85d5d;
+
+  --bg: var(--ice-white);
+  --panel: color-mix(in srgb, #ffffff 78%, var(--ice-white));
+  --line: color-mix(in srgb, var(--night-teal) 12%, transparent);
+  --text: var(--night-teal);
+  --muted: color-mix(in srgb, var(--night-teal) 58%, transparent);
+  --accent: var(--aurora-cyan);
   --ok: #1a7f4b;
   --radius: 12px;
-  font-family: "SF Pro Text", "PingFang SC", system-ui, sans-serif;
+  font-family:
+    "PingFang SC",
+    "Hiragino Sans GB",
+    "Microsoft YaHei UI",
+    "Segoe UI",
+    system-ui,
+    sans-serif;
+  line-height: 1.55;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #12161c;
-    --panel: #1b222ccc;
-    --line: #2d3744;
-    --text: #e8eef5;
-    --muted: #9aabbc;
+    --bg: #0a1f22;
+    --panel: color-mix(in srgb, #122f33 88%, transparent);
+    --line: color-mix(in srgb, var(--ice-white) 14%, transparent);
+    --text: var(--ice-white);
+    --muted: color-mix(in srgb, var(--ice-white) 62%, transparent);
+    --accent: var(--aurora-cyan);
   }
 }
 
@@ -27,7 +41,12 @@
 
 body.settings-body {
   margin: 0;
-  background: radial-gradient(1200px 600px at 10% -10%, #c9f2ef55, transparent),
+  background:
+    radial-gradient(
+      900px 420px at 8% -20%,
+      color-mix(in srgb, var(--aurora-cyan) 14%, transparent),
+      transparent 55%
+    ),
     var(--bg);
   color: var(--text);
   min-height: 100vh;
@@ -61,11 +80,11 @@ body.settings-body {
 }
 
 .nav-item:hover {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
 .nav-item.active {
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
   font-weight: 600;
 }
 
@@ -78,6 +97,13 @@ body.settings-body {
   margin: 0 0 18px;
   font-size: 22px;
   font-weight: 650;
+  color: var(--night-teal);
+}
+
+@media (prefers-color-scheme: dark) {
+  .settings-section h1 {
+    color: var(--ice-white);
+  }
 }
 
 .settings-section h2 {
@@ -114,8 +140,8 @@ body.settings-body {
 
 button {
   appearance: none;
-  border: 1px solid var(--line);
-  background: color-mix(in srgb, var(--panel) 92%, white);
+  border: 1px solid color-mix(in srgb, var(--night-teal) 14%, transparent);
+  background: color-mix(in srgb, #ffffff 55%, transparent);
   color: var(--text);
   border-radius: 8px;
   padding: 7px 12px;
@@ -123,8 +149,15 @@ button {
   cursor: pointer;
 }
 
+@media (prefers-color-scheme: dark) {
+  button {
+    border-color: color-mix(in srgb, var(--ice-white) 18%, transparent);
+    background: color-mix(in srgb, #1a3a3e 70%, transparent);
+  }
+}
+
 button:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--accent) 50%, var(--line));
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
 }
 
 button:disabled {

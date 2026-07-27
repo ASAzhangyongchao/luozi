@@ -2,14 +2,14 @@
 
 Cross-platform voice-to-text desktop app (Tauri 2 + Rust).
 
-**Status:** Mac-first **M7 voice edit (shortest path)** — second hotkey + text AI rewrite of selection/paragraph with protected-token confirm. M6 draft + M5 Groq ASR still available. **No downloadable Release yet.**
+**Status:** Mac-first **M8 settings shell (shortest)** — dedicated Settings / About window for ASR, text AI, hotkeys (read-only), and permissions. M7 voice edit + M6 draft + M5 Groq ASR still available. **No downloadable Release yet.**
 
 ## What works today
 
 - Hold `Control+Alt+Space`: transcript → draft when workbench focused, else AX / clipboard
 - Hold `Control+Alt+Shift+Space`: speak an edit instruction → text AI rewrites the draft scope
-- Tray: open draft, ASR mode, ASR/text-AI keys & consent, download model
-- Manual checklists: `docs/spikes/m5-manual.md`, `m6-manual.md`, `m7-manual.md`
+- Tray: **Settings…**, About, open draft, ASR mode, keys & consent, download model
+- Manual checklists: `docs/spikes/m5-manual.md` … `m8-manual.md`
 
 **Cloud:** ASR and text AI require separate consent; keys only in Keychain.
 
@@ -26,7 +26,7 @@ npm run install:macos-app
 
 ## Not yet
 
-Full suspicion marks / diff sheet, Settings UI (M8), GitHub Release installers, notarization.
+First-run wizard, liquid-glass polish, hotkey remapping UI, GitHub Release installers, notarization.
 
 ## License
 

@@ -3,7 +3,7 @@
   "identifier": "desktop-capability",
   "description": "Luozi M0 desktop hotkey capability",
   "platforms": ["macOS", "windows", "linux"],
-  "windows": ["main"],
+  "windows": ["main", "settings"],
   "permissions": [
     "global-shortcut:allow-is-registered",
     "global-shortcut:allow-register",

@@ -185,6 +185,12 @@ async function main() {
     }
   });
 
+  await listen("luozi://show-spike", async () => {
+    const spikePanel = document.querySelector<HTMLElement>("#spikePanel");
+    if (spikePanel) spikePanel.hidden = false;
+    statusEl().textContent = "已打开开发 Spike 面板";
+  });
+
   const win = getCurrentWindow();
   await win.onCloseRequested(async (event) => {
     event.preventDefault();

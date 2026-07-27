@@ -10,6 +10,7 @@ mod clipboard;
 pub mod controller;
 pub mod model_store;
 mod recorder;
+pub mod settings_api;
 pub mod text_ai;
 
 pub use controller::{

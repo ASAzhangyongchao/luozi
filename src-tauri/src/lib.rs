@@ -79,24 +79,91 @@ fn draft_reject_pending(draft: tauri::State<'_, DraftStore>) -> Result<(), Strin
     Ok(())
 }
 
+#[tauri::command]
+fn settings_snapshot(app: tauri::AppHandle) -> session::settings_api::SettingsSnapshot {
+    session::settings_api::snapshot(&app)
+}
+
+#[tauri::command]
+fn settings_cycle_asr_mode(app: tauri::AppHandle) -> Result<String, String> {
+    session::controller::cycle_asr_mode(&app).map(|m| m.label_zh().to_string())
+}
+
+#[tauri::command]
+fn settings_prompt_asr_key(app: tauri::AppHandle) -> Result<(), String> {
+    session::controller::prompt_and_store_groq_key(&app)
+}
+
+#[tauri::command]
+fn settings_consent_asr(app: tauri::AppHandle) -> Result<(), String> {
+    session::controller::consent_current_cloud(&app)
+}
+
+#[tauri::command]
+fn settings_prompt_text_ai_key(app: tauri::AppHandle) -> Result<(), String> {
+    session::controller::prompt_and_store_text_ai_key(&app)
+}
+
+#[tauri::command]
+fn settings_consent_text_ai(app: tauri::AppHandle) -> Result<(), String> {
+    session::controller::consent_current_text_ai(&app)
+}
+
+#[tauri::command]
+fn settings_open_microphone() -> Result<(), String> {
+    session::settings_api::open_privacy_microphone()
+}
+
+#[tauri::command]
+fn settings_open_accessibility() -> Result<(), String> {
+    session::settings_api::open_privacy_accessibility()
+}
+
+#[tauri::command]
+fn settings_open_repo() -> Result<(), String> {
+    session::settings_api::open_url(session::settings_api::GITHUB_REPO_URL)
+}
+
+#[tauri::command]
+fn settings_open_releases() -> Result<(), String> {
+    session::settings_api::open_url(session::settings_api::GITHUB_RELEASES_URL)
+}
+
+#[tauri::command]
+fn settings_open_spike(app: tauri::AppHandle) {
+    show_spike(&app);
+}
+
 fn show_draft(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.set_title("落字 · 语音草稿");
+        // Ensure product path is not left on ?spike from a prior Spike open.
         let _ = window.show();
         let _ = window.set_focus();
     }
 }
 
-fn show_main(app: &tauri::AppHandle) {
-    show_draft(app);
+fn show_settings(app: &tauri::AppHandle, section: Option<&str>) {
+    if let Some(window) = app.get_webview_window("settings") {
+        let _ = window.show();
+        let _ = window.set_focus();
+        if let Some(sec) = section {
+            let _ = window.emit("settings://nav", serde_json::json!({ "section": sec }));
+        }
+    }
+}
+
+fn show_spike(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.emit("luozi://show-spike", ());
+        let _ = window.set_title("落字 · Spike");
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
 }
 
 fn show_about(app: &tauri::AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.emit("luozi://show-about", ());
-        let _ = window.show();
-        let _ = window.set_focus();
-    }
+    show_settings(app, Some("about"));
 }
 
 fn with_session<F>(app: &tauri::AppHandle, f: F)
@@ -199,8 +266,8 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let mode = MenuItem::with_id(app, "mode", mode_label, false, None::<&str>)?;
     let sep_prefs = PredefinedMenuItem::separator(app)?;
 
-    let practice = MenuItem::with_id(app, "practice", "练习窗…", true, None::<&str>)?;
-    let settings = MenuItem::with_id(app, "settings", "设置…", false, None::<&str>)?;
+    let practice = MenuItem::with_id(app, "practice", "开发 Spike…", true, None::<&str>)?;
+    let settings = MenuItem::with_id(app, "settings", "设置…", true, None::<&str>)?;
     let perms = MenuItem::with_id(app, "perms", "检查权限…", true, None::<&str>)?;
     let sep_footer = PredefinedMenuItem::separator(app)?;
 
@@ -228,9 +295,9 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             &text_ai_consent,
             &mode,
             &sep_prefs,
-            &practice,
             &settings,
             &perms,
+            &practice,
             &sep_footer,
             &about,
             &quit,
@@ -242,8 +309,9 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .tooltip("落字 Luozi")
         .on_menu_event(|app, event| match event.id.as_ref() {
-            "practice" => show_main(app),
+            "practice" => show_spike(app),
             "draft" => show_draft(app),
+            "settings" => show_settings(app, Some("general")),
             "about" => show_about(app),
             "start" => with_session(app, |s| {
                 let _ = session::controller::start_continue_session(app, s);
@@ -293,18 +361,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
                     eprintln!("luozi: text ai consent failed: {err}");
                 }
             }
-            "perms" => {
-                #[cfg(target_os = "macos")]
-                {
-                    let _ = std::process::Command::new("open")
-                        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
-                        .spawn();
-                    let _ = std::process::Command::new("open")
-                        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
-                        .spawn();
-                }
-                show_about(app);
-            }
+            "perms" => show_settings(app, Some("permissions")),
             "quit" => app.exit(0),
             _ => {}
         })
@@ -526,6 +583,9 @@ pub fn run() {
                 let _ = main.set_title("落字 · 语音草稿");
                 let _ = main.hide();
             }
+            if let Some(settings) = app.get_webview_window("settings") {
+                let _ = settings.hide();
+            }
             if let Some(overlay) = app.get_webview_window("overlay") {
                 // Clear plate so CSS border-radius does not sit on a white window.
                 let _ = overlay.set_background_color(Some(tauri::window::Color(0, 0, 0, 0)));
@@ -643,14 +703,17 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            if window.label() == "main" {
-                if let WindowEvent::CloseRequested { api, .. } = event {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
                     api.prevent_close();
                     if let Some(draft) = window.app_handle().try_state::<DraftStore>() {
                         if let Err(err) = draft.flush() {
                             eprintln!("luozi: draft flush on hide failed: {err}");
                         }
                     }
+                    let _ = window.hide();
+                } else if window.label() == "settings" {
+                    api.prevent_close();
                     let _ = window.hide();
                 }
             }
@@ -672,6 +735,17 @@ pub fn run() {
             draft_set_selection,
             draft_apply_pending,
             draft_reject_pending,
+            settings_snapshot,
+            settings_cycle_asr_mode,
+            settings_prompt_asr_key,
+            settings_consent_asr,
+            settings_prompt_text_ai_key,
+            settings_consent_text_ai,
+            settings_open_microphone,
+            settings_open_accessibility,
+            settings_open_repo,
+            settings_open_releases,
+            settings_open_spike,
             run_focus_abc_probe,
             run_delivery_matrix_probe,
             run_overlay_cycle_probe,

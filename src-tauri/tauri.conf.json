@@ -35,6 +35,15 @@
         "focus": false,
         "focusable": false,
         "transparent": true
+      },
+      {
+        "label": "settings",
+        "title": "落字 · 设置",
+        "url": "settings.html",
+        "width": 760,
+        "height": 560,
+        "visible": false,
+        "skipTaskbar": true
       }
     ],
     "security": {

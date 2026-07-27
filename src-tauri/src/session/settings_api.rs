@@ -1,3 +1,5 @@
+//! Aggregated settings snapshot + helpers for the settings window (M8).
+
 use std::sync::Mutex;
 
 use luozi_core::AppConfig;

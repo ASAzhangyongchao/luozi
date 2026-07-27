@@ -123,3 +123,53 @@ pub fn paste_via_cmd_v() -> Result<(), String> {
         Err("paste_via_cmd_v unsupported on this platform".into())
     }
 }
+
+#[cfg(target_os = "macos")]
+pub fn current_frontmost_pid() -> Option<i32> {
+    macos::current_frontmost_pid()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn current_frontmost_pid() -> Option<i32> {
+    None
+}
+
+#[cfg(target_os = "macos")]
+pub fn activate_pid(pid: i32) -> Result<(), String> {
+    macos::activate_pid(pid)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn activate_pid(_pid: i32) -> Result<(), String> {
+    Err("activate_pid unsupported".into())
+}
+
+#[cfg(target_os = "macos")]
+pub fn type_text_via_cg_events(text: &str) -> Result<(), String> {
+    macos::type_text_via_cg_events(text)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn type_text_via_cg_events(_text: &str) -> Result<(), String> {
+    Err("type_text_via_cg_events unsupported".into())
+}
+
+#[cfg(target_os = "macos")]
+pub fn focused_field_contains(needle: &str) -> bool {
+    macos::focused_field_contains(needle)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn focused_field_contains(_needle: &str) -> bool {
+    false
+}
+
+#[cfg(target_os = "macos")]
+pub fn accessibility_is_trusted() -> bool {
+    macos::accessibility_is_trusted()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn accessibility_is_trusted() -> bool {
+    false
+}

@@ -5,7 +5,7 @@ use accessibility_sys::{
     kAXChildrenAttribute, kAXErrorSuccess, kAXFocusedApplicationAttribute, kAXFocusedAttribute,
     kAXFocusedUIElementAttribute, kAXFocusedWindowAttribute, kAXIdentifierAttribute,
     kAXPositionAttribute, kAXRoleAttribute, kAXSecureTextFieldSubrole, kAXSelectedTextAttribute,
-    kAXSizeAttribute, kAXSubroleAttribute, kAXTextAreaRole, kAXTextFieldRole,
+    kAXSizeAttribute, kAXSubroleAttribute, kAXTextAreaRole, kAXTextFieldRole, kAXValueAttribute,
     kAXTrustedCheckOptionPrompt, kAXValueTypeCGPoint, kAXValueTypeCGSize,
     AXIsProcessTrustedWithOptions, AXUIElementCopyAttributeValue, AXUIElementCreateApplication,
     AXUIElementCreateSystemWide, AXUIElementGetPid, AXUIElementRef, AXUIElementSetAttributeValue,
@@ -166,6 +166,56 @@ fn frontmost_pid() -> Option<i32> {
     }
 }
 
+pub(crate) fn current_frontmost_pid() -> Option<i32> {
+    frontmost_pid()
+}
+
+pub(crate) fn accessibility_is_trusted() -> bool {
+    ensure_accessibility().is_ok()
+}
+
+/// Bring another app to front so caret paste / typing lands there (not in Luozi).
+pub(crate) fn activate_pid(pid: i32) -> Result<(), String> {
+    use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication};
+
+    let Some(app) = NSRunningApplication::runningApplicationWithProcessIdentifier(pid) else {
+        return Err(format!("no_running_app_for_pid:{pid}"));
+    };
+    let ok = app.activateWithOptions(
+        NSApplicationActivationOptions::ActivateIgnoringOtherApps
+            | NSApplicationActivationOptions::ActivateAllWindows,
+    );
+    if ok {
+        Ok(())
+    } else {
+        Err(format!("activate_pid_failed:{pid}"))
+    }
+}
+
+/// Type Unicode into the focused field via CGEvent (works in many Electron editors).
+pub(crate) fn type_text_via_cg_events(text: &str) -> Result<(), String> {
+    if text.is_empty() {
+        return Ok(());
+    }
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+        .map_err(|_| "cg_event_source_failed".to_string())?;
+
+    // CGEventKeyboardSetUnicodeString accepts limited UTF-16 per event — chunk it.
+    let utf16: Vec<u16> = text.encode_utf16().collect();
+    for chunk in utf16.chunks(20) {
+        let down = CGEvent::new_keyboard_event(source.clone(), 0, true)
+            .map_err(|_| "cg_unicode_down_failed".to_string())?;
+        down.set_string_from_utf16_unchecked(chunk);
+        down.post(CGEventTapLocation::HID);
+
+        let up = CGEvent::new_keyboard_event(source.clone(), 0, false)
+            .map_err(|_| "cg_unicode_up_failed".to_string())?;
+        up.post(CGEventTapLocation::HID);
+        thread::sleep(Duration::from_millis(8));
+    }
+    Ok(())
+}
+
 fn trusted_status_label() -> &'static str {
     match ensure_accessibility() {
         Ok(()) => "trusted",
@@ -304,7 +354,14 @@ pub(crate) fn paste_via_cmd_v() -> Result<(), String> {
 }
 
 fn role_supports_text_insert(role: &str) -> bool {
-    role == kAXTextFieldRole || role == kAXTextAreaRole || role == "AXComboBox"
+    role == kAXTextFieldRole
+        || role == kAXTextAreaRole
+        || role == "AXComboBox"
+        || role == "AXWebArea"
+        || role == "AXGroup"
+        || role == "AXScrollArea"
+        || role == "AXDocument"
+        || role.to_lowercase().contains("text")
 }
 
 unsafe fn element_is_secure(element: AXUIElementRef) -> bool {
@@ -473,6 +530,32 @@ pub(crate) fn validate_target(token: &TargetToken) -> Result<ValidationState, St
     }
 }
 
+/// Read AXValue / AXSelectedText from the current focused element (best-effort).
+pub(crate) fn read_focused_field_text() -> Option<String> {
+    ensure_accessibility().ok()?;
+    unsafe {
+        let current = capture_focused().ok()?;
+        if let Some(v) = copy_string_attr(current.focused, kAXValueAttribute) {
+            if !v.is_empty() {
+                return Some(v);
+            }
+        }
+        copy_string_attr(current.focused, kAXSelectedTextAttribute)
+    }
+}
+
+/// True when focused field value contains `needle` (post-insert verification).
+pub(crate) fn focused_field_contains(needle: &str) -> bool {
+    let needle = needle.trim();
+    if needle.is_empty() {
+        return false;
+    }
+    match read_focused_field_text() {
+        Some(v) => v.contains(needle),
+        None => false,
+    }
+}
+
 pub(crate) fn deliver_probe(token: &TargetToken) -> Result<ValidationState, String> {
     deliver_text(token, "落字测试")
 }
@@ -506,10 +589,28 @@ pub(crate) fn deliver_text(token: &TargetToken, text: &str) -> Result<Validation
             cf_text.as_CFTypeRef(),
         );
         if err == kAXErrorSuccess {
-            Ok(ValidationState::SameTarget)
-        } else {
-            eprintln!("luozi: AXSelectedText set failed ({err}); caller may paste");
-            Ok(ValidationState::Unsupported)
+            // SetAttribute success ≠ visible insert in Electron; verify when possible.
+            thread::sleep(Duration::from_millis(40));
+            if focused_field_contains(text) {
+                return Ok(ValidationState::SameTarget);
+            }
+            eprintln!("luozi: AXSelectedText set ok but value verify failed");
         }
+        // Fallback: replace entire value (some fields reject selected-text sets).
+        let value_attr = CFString::new(kAXValueAttribute);
+        let err2 = AXUIElementSetAttributeValue(
+            current.focused,
+            value_attr.as_concrete_TypeRef(),
+            cf_text.as_CFTypeRef(),
+        );
+        if err2 == kAXErrorSuccess {
+            thread::sleep(Duration::from_millis(40));
+            if focused_field_contains(text) {
+                return Ok(ValidationState::SameTarget);
+            }
+            eprintln!("luozi: AXValue set ok but value verify failed");
+        }
+        eprintln!("luozi: AX insert failed selected={err} value={err2}; caller may type/paste");
+        Ok(ValidationState::Unsupported)
     }
 }

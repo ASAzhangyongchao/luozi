@@ -17,6 +17,20 @@ src-tauri/target/
 src-tauri/icons/android/
 src-tauri/icons/ios/
 
+# Whisper / local models (never commit weights)
+*.bin
+models/
+!src-tauri/resources/models-manifest.json
+
+# Secrets / local env
+.env
+.env.*
+!.env.example
+*.p12
+*.pem
+*.p8
+
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

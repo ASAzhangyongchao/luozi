@@ -1,209 +1,151 @@
-import {
-  isRegistered,
-  register,
-  unregisterAll,
-  type ShortcutEvent,
-} from "@tauri-apps/plugin-global-shortcut";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Window } from "@tauri-apps/api/window";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./styles.css";
 
+type DraftState = {
+  text: string;
+  canUndo: boolean;
+  canRedo: boolean;
+  hasLastTranscript: boolean;
+  saveStatus: string;
+};
+
 type AppConfig = {
-  schemaVersion: number;
   continueSpeakingShortcut: string;
-  voiceEditShortcut: string;
-  holdToTalk: boolean;
   shortcutsProvisional: boolean;
-  language: string;
 };
 
-type FocusProbeReport = {
-  ok: boolean;
-  message: string;
-  [key: string]: unknown;
-};
+let saveTimer: ReturnType<typeof setTimeout> | undefined;
+let applyingRemote = false;
 
-type TargetToken = {
-  platform: string;
-  processId: number;
-  windowId: string;
-  elementId: string;
-  role: string;
-  isSecure: boolean;
-  capturedAtMs: number;
-};
+const editor = () => document.querySelector<HTMLTextAreaElement>("#editor")!;
+const saveHint = () => document.querySelector<HTMLParagraphElement>("#saveHint")!;
+const statusEl = () => document.querySelector<HTMLParagraphElement>("#status")!;
+const btnUndo = () => document.querySelector<HTMLButtonElement>("#btnUndo")!;
+const btnRedo = () => document.querySelector<HTMLButtonElement>("#btnRedo")!;
+const btnLoadLast = () => document.querySelector<HTMLButtonElement>("#btnLoadLast")!;
 
-type ValidationState =
-  | "same_target"
-  | "changed"
-  | "unsupported"
-  | "secure";
-
-type AudioProbeResult = {
-  sampleRate: number;
-  channels: number;
-  frames: number;
-  bytes: number;
-  deleted: boolean;
-};
-
-async function main() {
-  const status = document.querySelector<HTMLParagraphElement>("#status")!;
-  const shortcutList = document.querySelector<HTMLUListElement>("#shortcutList")!;
-  const aboutCard = document.querySelector<HTMLElement>("#aboutCard")!;
-  const aboutText = document.querySelector<HTMLPreElement>("#aboutText")!;
-  const closeAbout = document.querySelector<HTMLButtonElement>("#closeAbout")!;
-  const spikeCard = document.querySelector<HTMLElement>("#spikeCard")!;
-
-  const config = await invoke<AppConfig>("get_app_config");
-  let registeredContinue = config.continueSpeakingShortcut;
-  try {
-    const st = await invoke<{ registeredContinue?: string | null }>("session_status");
-    if (st.registeredContinue) registeredContinue = st.registeredContinue;
-  } catch {
-    /* session command may be unavailable in very early boot */
+function applyState(st: DraftState) {
+  applyingRemote = true;
+  const el = editor();
+  if (el.value !== st.text) {
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    el.value = st.text;
+    const max = el.value.length;
+    el.setSelectionRange(Math.min(start, max), Math.min(end, max));
   }
-  shortcutList.innerHTML = `
-    <li>继续说：<code>${registeredContinue}</code>${
-      config.shortcutsProvisional ? "（provisional）" : ""
-    }</li>
-    <li>语音修改：<code>${config.voiceEditShortcut}</code>（未启用）</li>
-    <li>按住说话：${config.holdToTalk ? "开" : "关"}</li>
-    <li>schemaVersion：${config.schemaVersion}</li>
-  `;
-
-  aboutText.textContent = [
-    "落字 Luozi  0.0.0",
-    `schemaVersion=${config.schemaVersion}`,
-    `shortcutsProvisional=${config.shortcutsProvisional}`,
-    `continue=${registeredContinue}`,
-    `voiceEdit=${config.voiceEditShortcut}`,
-    "M2 假文本会话 · Mac-first",
-    "尚无可下载 Release",
-  ].join("\n");
-
-  closeAbout.addEventListener("click", () => {
-    aboutCard.hidden = true;
-  });
-
-  await listen("luozi://show-about", () => {
-    aboutCard.hidden = false;
-  });
-
-  const spikeEnabled =
-    typeof window !== "undefined" &&
-    new URLSearchParams(window.location.search).has("spike");
-
-  // Product hotkey: prefer Rust registration; surface actual binding in UI.
-  status.textContent = spikeEnabled
-    ? "Spike 模式（开发）"
-    : `练习窗 · 按住 ${registeredContinue} ≥0.3s 松手落字 · Esc 取消`;
-
-  if (!spikeEnabled) {
-    return;
-  }
-
-  spikeCard.hidden = false;
-  const shortcut = document.querySelector<HTMLSelectElement>("#shortcut")!;
-  const registerButton = document.querySelector<HTMLButtonElement>("#register")!;
-  const clearButton = document.querySelector<HTMLButtonElement>("#clear")!;
-  const autoFocusButton = document.querySelector<HTMLButtonElement>("#autoFocus")!;
-  const audioProbeButton = document.querySelector<HTMLButtonElement>("#audioProbe")!;
-  const showOverlayButton = document.querySelector<HTMLButtonElement>("#showOverlay")!;
-  const hideOverlayButton = document.querySelector<HTMLButtonElement>("#hideOverlay")!;
-  const events = document.querySelector<HTMLPreElement>("#events")!;
-  const focusReport = document.querySelector<HTMLPreElement>("#focusReport")!;
-  const deliveryReport = document.querySelector<HTMLPreElement>("#deliveryReport")!;
-  const audioReport = document.querySelector<HTMLPreElement>("#audioReport")!;
-
-  let sequence = 0;
-  let deliveryRun = 0;
-  const overlay = await Window.getByLabel("overlay");
-  shortcut.value = config.continueSpeakingShortcut;
-
-  function appendDelivery(line: string) {
-    deliveryReport.textContent = `${line}\n${deliveryReport.textContent ?? ""}`;
-  }
-
-  async function runDeliveryProbe() {
-    const run = ++deliveryRun;
-    try {
-      const token = await invoke<TargetToken>("capture_target");
-      appendDelivery(`capture\t${JSON.stringify(token)}`);
-      window.setTimeout(async () => {
-        if (run !== deliveryRun) return;
-        const validation = await invoke<ValidationState>("validate_target", { token });
-        appendDelivery(`validate\t${validation}`);
-        if (validation !== "same_target") {
-          appendDelivery("clipboard_fallback_expected\tno_insert");
-          return;
-        }
-        const delivered = await invoke<ValidationState>("deliver_probe", { token });
-        appendDelivery(`deliver\t${delivered}`);
-      }, 2_000);
-    } catch (error) {
-      appendDelivery(`target_error\t${String(error)}`);
-    }
-  }
-
-  function appendEvent(event: ShortcutEvent) {
-    sequence += 1;
-    events.textContent = `${sequence}\t${Date.now()}\t${event.shortcut}\t${event.state}\n${events.textContent ?? ""}`;
-    if (event.state === "Pressed") {
-      void overlay?.show();
-      void runDeliveryProbe();
-    } else {
-      void overlay?.hide();
-    }
-  }
-
-  async function registerCandidate(candidate: string) {
-    await unregisterAll();
-    events.textContent = "";
-    sequence = 0;
-    await register(candidate, appendEvent);
-    status.textContent = `Registered: ${await isRegistered(candidate)}`;
-  }
-
-  registerButton.addEventListener("click", async () => {
-    try {
-      await registerCandidate(shortcut.value);
-    } catch (error) {
-      status.textContent = `Registration failed: ${String(error)}`;
-    }
-  });
-  clearButton.addEventListener("click", async () => {
-    await unregisterAll();
-    status.textContent = "Not registered";
-  });
-  autoFocusButton.addEventListener("click", async () => {
-    focusReport.textContent = "Running…";
-    try {
-      const report = await invoke<FocusProbeReport>("run_focus_abc_probe");
-      focusReport.textContent = JSON.stringify(report, null, 2);
-    } catch (error) {
-      focusReport.textContent = String(error);
-    }
-  });
-  audioProbeButton.addEventListener("click", async () => {
-    audioReport.textContent = "Recording 1s…";
-    try {
-      audioReport.textContent = JSON.stringify(
-        await invoke<AudioProbeResult>("record_one_second_probe"),
-        null,
-        2,
-      );
-    } catch (error) {
-      audioReport.textContent = String(error);
-    }
-  });
-  showOverlayButton.addEventListener("click", () => void overlay?.show());
-  hideOverlayButton.addEventListener("click", () => void overlay?.hide());
-
-  window.addEventListener("beforeunload", () => {
-    void unregisterAll();
-  });
+  btnUndo().disabled = !st.canUndo;
+  btnRedo().disabled = !st.canRedo;
+  btnLoadLast().hidden = !st.hasLastTranscript;
+  applyingRemote = false;
 }
 
-void main();
+async function refresh() {
+  const st = await invoke<DraftState>("draft_state");
+  applyState(st);
+  return st;
+}
+
+function scheduleSave() {
+  if (applyingRemote) return;
+  saveHint().textContent = "保存中…";
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(async () => {
+    try {
+      const st = await invoke<DraftState>("draft_save", { text: editor().value });
+      applyState(st);
+      saveHint().textContent = "已自动保存";
+      setTimeout(() => {
+        if (saveHint().textContent === "已自动保存") saveHint().textContent = "";
+      }, 1500);
+    } catch (err) {
+      saveHint().textContent = `保存失败：${err}`;
+    }
+  }, 1000);
+}
+
+async function flushNow() {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = undefined;
+  }
+  try {
+    await invoke<DraftState>("draft_save", { text: editor().value });
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+async function main() {
+  const spike = new URLSearchParams(location.search).has("spike");
+  const spikePanel = document.querySelector<HTMLElement>("#spikePanel");
+  if (spike && spikePanel) {
+    spikePanel.hidden = false;
+  }
+
+  try {
+    const cfg = await invoke<AppConfig>("get_app_config");
+    const hint = document.querySelector("#hotkeyHint");
+    if (hint) hint.textContent = cfg.continueSpeakingShortcut;
+  } catch {
+    /* ignore */
+  }
+
+  await refresh();
+
+  editor().addEventListener("input", () => scheduleSave());
+
+  btnUndo().addEventListener("click", async () => {
+    await flushNow();
+    applyState(await invoke("draft_undo"));
+  });
+  btnRedo().addEventListener("click", async () => {
+    await flushNow();
+    applyState(await invoke("draft_redo"));
+  });
+  document.querySelector("#btnCopy")!.addEventListener("click", async () => {
+    const text = editor().value;
+    try {
+      await navigator.clipboard.writeText(text);
+      statusEl().textContent = "已复制纯文本";
+    } catch {
+      statusEl().textContent = "复制失败";
+    }
+  });
+  document.querySelector("#btnClear")!.addEventListener("click", async () => {
+    if (!editor().value) return;
+    if (!confirm("清空当前草稿？此操作可在清空前已保存的版本中恢复需自行备份。")) return;
+    applyState(await invoke("draft_clear"));
+    statusEl().textContent = "草稿已清空";
+  });
+  btnLoadLast().addEventListener("click", async () => {
+    try {
+      applyState(await invoke("draft_load_last"));
+      statusEl().textContent = "已载入最近落字";
+    } catch {
+      statusEl().textContent = "没有可载入的最近落字";
+    }
+  });
+
+  await listen("draft://updated", async () => {
+    await refresh();
+    statusEl().textContent = "已写入草稿";
+  });
+
+  const win = getCurrentWindow();
+  await win.onCloseRequested(async (event) => {
+    // Rust also prevents close + flush; this is belt-and-suspenders for pending edits.
+    event.preventDefault();
+    await flushNow();
+    await win.hide();
+  });
+
+  statusEl().textContent = "就绪 · 关闭窗口回到托盘";
+}
+
+main().catch((err) => {
+  console.error(err);
+  document.body.textContent = `工作台加载失败：${err}`;
+});

@@ -4,13 +4,15 @@
 
 ### Added
 
+- M6 draft workbench: autosave, 20-step undo/redo, copy/clear, last-transcript load, dictation into focused draft
+- M5 cloud ASR (Mac-first Groq): Keychain, per-provider consent, OpenAI-compatible `/audio/transcriptions`, local-first Auto routing
+- M4 model acquisition: embedded `models-manifest.json`, SHA256 verify, tray「下载推荐模型…」, `npm run fetch:model` checksum, idle Whisper unload (≥5m)
 - M2 Mac-first session path: state machine, continuous mic capture, Esc cancel, fake transcript delivery, clipboard fallback + undo
-- M3 local Whisper (`whisper-rs` + Metal): `ggml-small` manual model path, resample to 16 kHz, replace fake transcript
+- M3 local Whisper (`whisper-rs` + Metal): `ggml-small` model path, resample to 16 kHz, replace fake transcript
 - Falling Cursor brand assets, Dock RGBA icon, menu-bar template tray icon
 - Cargo workspace with `luozi-core` (`AppConfig` schemaVersion = 1)
 - Tray shell aligned to design §6.3 (M2 enables start / cancel / undo)
-- `npm run run:macos-app` helper to open bundled `Luozi.app` for stable TCC checks
-- `npm run fetch:model` helper to download `ggml-small.bin` into Application Support
+- `npm run run:macos-app` / `install:macos-app` helpers for stable TCC checks
 - macOS / Windows CI workflow definition
 - M0 Spike evidence retained under `docs/spikes/` and `tests/manual/`
 
@@ -29,4 +31,5 @@
 - No public release artifacts yet
 - Shortcuts remain provisional (Mac-first Partial M0)
 - Build requires `cmake` for `whisper-rs-sys`
-- Model file is not in Git; missing model surfaces `model_missing` instead of fake text
+- Model file is not in Git; cloud Key never enters config.json / git / logs
+- Full Settings UI is M8; M5 uses tray + Keychain + consent file

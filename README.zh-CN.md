@@ -2,50 +2,21 @@
 
 跨平台快捷语音转文字桌面应用（Tauri 2 + Rust）。
 
-**现状：** Mac-first **M3 本地 Whisper**（`ggml-small`，模型手动放置）。**尚无可下载 Release。**
+**现状：** Mac-first **M6 语音草稿工作台**（编辑/粘贴/复制/自动保存/撤销；工作台焦点时语音写入草稿）。M5 Groq 云端仍可用。**尚无可下载 Release。**
 
 ## 当前可用
 
-- 按住 `Control+Alt+Space`：真录音 → 本地 Whisper 转写 → AX 插入 / 剪贴板+⌘V / 仅剪贴板
-- Esc（仅录音中注册）：取消当前会话
-- 托盘：开始语音输入 / 取消 / 撤销上次落字（剪贴板路径）/ 练习窗 / 关于 / 退出
-- `luozi-core` 会话状态机单测 + `AppConfig.schemaVersion = 1`
-- 「落光 · Falling Cursor」品牌资产：`assets/brand/`
-- 手工验收：`docs/spikes/m2-manual.md`（会话）、`docs/spikes/m3-manual.md`（Whisper）
-- M0 Spike 证据仍在 `docs/spikes/`、`tests/manual/`（Overall = **Partial**）
+- 按住 `Control+Alt+Space`：转写 → 工作台焦点则写入草稿，否则 AX / 剪贴板
+- 托盘 **打开语音草稿**、引擎模式、Groq Key/同意、下载模型
+- 手工验收：`docs/spikes/m5-manual.md`、`docs/spikes/m6-manual.md`
 
-**权限：** 麦克风 / 辅助功能必须授给**实际运行的那个进程**。`npm run tauri dev` 用的是 `target/debug/luozi`；打包的 **`Luozi.app`** 是另一套签名，开关不能共用。
+**云端（M5）：** Key 只进钥匙串；默认不上传；须同意 `api.groq.com`。
 
-**模型：** 将 `ggml-small.bin` 放到  
-`~/Library/Application Support/app.luozi.desktop/models/ggml-small.bin`  
-（或 `npm run fetch:model`）。可用环境变量 `LUOZI_WHISPER_MODEL` 覆盖。编译需要 `cmake`（`brew install cmake`）。
-
-## 品牌
-
-视觉语言：**落光 · Falling Cursor**（夜青 `#0B3034` + 极光青 `#42D9D3` + 冰白 `#F4FBFA`）。
-
-## 快捷键（临时）
-
-| 动作 | 临时绑定（macOS） |
-|---|---|
-| 继续说（按住） | `Control+Alt+Space` |
-| 取消 | `Esc`（会话进行中） |
-| 语音修改 | `Control+Alt+M`（尚未启用） |
-
-## 开发
-
-```bash
-brew install cmake          # 一次，编译 whisper-rs
-npm ci
-npm run fetch:model         # 约 466MB ggml-small.bin
-npm run tauri dev
-cargo test --workspace
-npm run run:macos-app       # 构建并打开 Luozi.app（稳定权限验收）
-```
+**权限：** `npm run install:macos-app` → `/Applications/Luozi.app`。
 
 ## 明确还没有
 
-应用内模型下载器（M4）、云端 ASR、工作台、语音修改、公开仓、公证安装包。
+说出修改 / 文本 AI（M7）、完整设置页（M8）、Release 安装包、公证。
 
 ## 许可证
 

@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "run:macos-app": "bash scripts/run-macos-app.sh",
+    "install:macos-app": "bash scripts/install-macos-app.sh",
     "fetch:model": "bash scripts/fetch-ggml-small.sh"
   },
   "dependencies": {

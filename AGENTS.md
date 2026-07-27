@@ -13,4 +13,5 @@ cargo test --workspace
 ```
 
 5. Windows CI compile success is not a substitute for real-machine hotkey/focus tests.
-6. Do not create the public GitHub repository or knowledge-system submodule without maintainer confirmation.
+6. Public source of truth: https://github.com/ASAzhangyongchao/luozi. Do not recreate the GitHub repo or convert `apps/luozi` into a knowledge-system submodule without maintainer confirmation.
+7. Signing: same interim policy as QuotaPet — ad-hoc first; no notarized Release until personal Developer ID is ready. Packaging/Release scripts can land later.

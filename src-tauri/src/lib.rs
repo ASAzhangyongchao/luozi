@@ -4,6 +4,7 @@ mod spike;
 use luozi_core::AppConfig;
 use session::{
     session_cancel, session_start, session_status, session_stop, session_undo_last, AppSessionState,
+    DraftStateDto, DraftStore,
 };
 use spike::{
     capture_target, deliver_probe, record_one_second_probe, run_delivery_matrix_probe,
@@ -19,14 +20,59 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 #[tauri::command]
 fn get_app_config() -> AppConfig {
-    AppConfig::default()
+    session::config_store::load()
 }
 
-fn show_main(app: &tauri::AppHandle) {
+#[tauri::command]
+fn draft_state(draft: tauri::State<'_, DraftStore>) -> DraftStateDto {
+    draft.snapshot()
+}
+
+#[tauri::command]
+fn draft_save(text: String, draft: tauri::State<'_, DraftStore>) -> Result<DraftStateDto, String> {
+    draft.save_text(text)
+}
+
+#[tauri::command]
+fn draft_undo(draft: tauri::State<'_, DraftStore>) -> Result<DraftStateDto, String> {
+    draft.undo()
+}
+
+#[tauri::command]
+fn draft_redo(draft: tauri::State<'_, DraftStore>) -> Result<DraftStateDto, String> {
+    draft.redo()
+}
+
+#[tauri::command]
+fn draft_clear(draft: tauri::State<'_, DraftStore>) -> Result<DraftStateDto, String> {
+    draft.clear()
+}
+
+#[tauri::command]
+fn draft_load_last(draft: tauri::State<'_, DraftStore>) -> Result<DraftStateDto, String> {
+    draft.load_last_into_draft()
+}
+
+#[tauri::command]
+fn draft_insert(
+    start: usize,
+    end: usize,
+    text: String,
+    draft: tauri::State<'_, DraftStore>,
+) -> Result<DraftStateDto, String> {
+    draft.insert_at(start, end, &text)
+}
+
+fn show_draft(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
+        let _ = window.set_title("落字 · 语音草稿");
         let _ = window.show();
         let _ = window.set_focus();
     }
+}
+
+fn show_main(app: &tauri::AppHandle) {
+    show_draft(app);
 }
 
 fn show_about(app: &tauri::AppHandle) {
@@ -48,13 +94,20 @@ where
 
 /// Tray IA follows design §6.3. M2 enables start / cancel / undo.
 fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
-    let cfg = AppConfig::default();
+    let cfg = session::config_store::load();
 
     let model_ready = session::asr::default_model_path().is_file();
-    let status_label = if model_ready {
-        "Whisper 就绪 · 快捷键临时"
+    let cloud_ok = session::cloud::cloud_ready(&cfg.cloud_asr);
+    let ax_ok = session::controller::accessibility_trusted_for_tray();
+    let model_label = session::model_store::model_status();
+    let cloud_label = if cloud_ok {
+        "Groq 就绪"
     } else {
-        "模型未就绪 · 运行 npm run fetch:model"
+        "Groq 未配置"
+    };
+    let status_label = match ax_ok {
+        true => format!("{model_label} · {cloud_label} · 辅助功能 OK"),
+        false => format!("{model_label} · {cloud_label} · 辅助功能未生效"),
     };
     let title = MenuItem::with_id(app, "title", "落字", false, None::<&str>)?;
     let status = MenuItem::with_id(app, "status", status_label, false, None::<&str>)?;
@@ -67,7 +120,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         true,
         Some(cfg.continue_speaking_shortcut.as_str()),
     )?;
-    let draft = MenuItem::with_id(app, "draft", "打开语音草稿", false, None::<&str>)?;
+    let draft = MenuItem::with_id(app, "draft", "打开语音草稿", true, None::<&str>)?;
     let voice_edit = MenuItem::with_id(
         app,
         "voice_edit",
@@ -79,12 +132,35 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let undo = MenuItem::with_id(app, "undo", "撤销上次落字", true, None::<&str>)?;
     let sep_actions = PredefinedMenuItem::separator(app)?;
 
-    let engine_label = if model_ready {
-        "引擎：本地 Whisper（M3）"
-    } else {
-        "引擎：模型未安装"
+    let engine_label = match (model_ready, cloud_ok) {
+        (true, true) => "引擎：本地+云端（M5）",
+        (true, false) => "引擎：本地 Whisper",
+        (false, true) => "引擎：仅云端 Groq",
+        (false, false) => "引擎：未就绪",
     };
     let engine = MenuItem::with_id(app, "engine", engine_label, false, None::<&str>)?;
+    let asr_mode = MenuItem::with_id(
+        app,
+        "asr_mode",
+        &format!("切换引擎模式（当前：{}）", cfg.asr_mode.label_zh()),
+        true,
+        None::<&str>,
+    )?;
+    let fetch_model = MenuItem::with_id(
+        app,
+        "fetch_model",
+        "下载推荐模型…",
+        true,
+        None::<&str>,
+    )?;
+    let groq_key = MenuItem::with_id(app, "groq_key", "配置 Groq Key…", true, None::<&str>)?;
+    let groq_consent = MenuItem::with_id(
+        app,
+        "groq_consent",
+        "同意上传到 Groq…",
+        true,
+        None::<&str>,
+    )?;
     let mode_label = if cfg.hold_to_talk {
         "录音模式：按住说话"
     } else {
@@ -114,6 +190,10 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             &undo,
             &sep_actions,
             &engine,
+            &asr_mode,
+            &fetch_model,
+            &groq_key,
+            &groq_consent,
             &mode,
             &sep_prefs,
             &practice,
@@ -131,6 +211,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         .tooltip("落字 Luozi")
         .on_menu_event(|app, event| match event.id.as_ref() {
             "practice" => show_main(app),
+            "draft" => show_draft(app),
             "about" => show_about(app),
             "start" => with_session(app, |s| {
                 let _ = session::controller::start_session(app, s);
@@ -141,6 +222,26 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             "undo" => with_session(app, |s| {
                 let _ = session::controller::undo_last(app, s);
             }),
+            "fetch_model" => with_session(app, |s| {
+                session::controller::fetch_recommended_model(app, s);
+            }),
+            "asr_mode" => {
+                if let Err(err) = session::controller::cycle_asr_mode(app) {
+                    eprintln!("luozi: cycle asr mode failed: {err}");
+                }
+            }
+            "groq_key" => {
+                if let Err(err) = session::controller::prompt_and_store_groq_key(app) {
+                    if err != "canceled" {
+                        eprintln!("luozi: groq key failed: {err}");
+                    }
+                }
+            }
+            "groq_consent" => {
+                if let Err(err) = session::controller::consent_current_cloud(app) {
+                    eprintln!("luozi: consent failed: {err}");
+                }
+            }
             "perms" => {
                 #[cfg(target_os = "macos")]
                 {
@@ -156,14 +257,16 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             "quit" => app.exit(0),
             _ => {}
         })
-        .on_tray_icon_event(|tray, event| {
+        .on_tray_icon_event(|_tray, event| {
+            // Formal product path is hotkey + menu. Left-click must NOT open the
+            // unfinished practice window (that confused formal testing).
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
                 ..
             } = event
             {
-                show_main(tray.app_handle());
+                eprintln!("luozi: tray left-click ignored (use menu / hotkey)");
             }
         });
 
@@ -186,7 +289,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
 /// Register continue-speaking with a dedicated handler (do not also call `register`).
 /// Escape is registered only while a session is active; handled by Builder::with_handler.
 fn register_session_shortcuts(app: &tauri::AppHandle) -> Result<String, String> {
-    let cfg = AppConfig::default();
+    let cfg = session::config_store::load();
     let primary = cfg.continue_speaking_shortcut.clone();
     let candidates = [
         primary.as_str(),
@@ -224,6 +327,7 @@ fn register_session_shortcuts(app: &tauri::AppHandle) -> Result<String, String> 
                     // on the main thread beachballs the app (Esc dies, overlay stuck).
                     std::thread::spawn(move || {
                         with_session(&app, |s| {
+                            session::controller::note_hold_pressed(s);
                             if let Err(err) = session::controller::start_session(&app, s) {
                                 eprintln!("luozi: session_start failed: {err}");
                             }
@@ -233,8 +337,12 @@ fn register_session_shortcuts(app: &tauri::AppHandle) -> Result<String, String> 
                 ShortcutState::Released if hold => {
                     std::thread::spawn(move || {
                         with_session(&app, |s| {
-                            if !session::controller::wait_until_recording(s, 2000) {
-                                eprintln!("luozi: release before recording ready");
+                            // Always clear hold first — start() may still be blocked on mic TCC.
+                            session::controller::note_hold_released(s);
+                            if !session::controller::wait_until_recording(s, 800) {
+                                eprintln!(
+                                    "luozi: release before recording ready (will cancel after mic opens)"
+                                );
                                 return;
                             }
                             if let Err(err) = session::controller::stop_session(&app, s) {
@@ -305,15 +413,38 @@ pub fn run() {
                 .build(),
         )
         .manage(AppSessionState::default())
+        .manage(DraftStore::default())
         .setup(|app| {
             // Tray-first: never leave a blank main window on launch.
             if let Some(main) = app.get_webview_window("main") {
+                let _ = main.set_title("落字 · 语音草稿");
                 let _ = main.hide();
+            }
+            if let Some(overlay) = app.get_webview_window("overlay") {
+                // Clear plate so CSS border-radius does not sit on a white window.
+                let _ = overlay.set_background_color(Some(tauri::window::Color(0, 0, 0, 0)));
+                let _ = overlay.set_ignore_cursor_events(true);
+                let _ = overlay.hide();
             }
             build_tray(app.handle())?;
             match register_session_shortcuts(app.handle()) {
                 Ok(name) => eprintln!("luozi: hotkey ready → {name}"),
                 Err(err) => eprintln!("luozi: shortcut registration failed: {err}"),
+            }
+            // First-run mic TCC should not happen mid hold-to-talk.
+            session::controller::warmup_microphone_async();
+
+            // M4: unload Whisper after ≥5 minutes idle (poll once a minute).
+            {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    loop {
+                        std::thread::sleep(std::time::Duration::from_secs(60));
+                        with_session(&handle, |s| {
+                            session::controller::maybe_unload_idle_asr(s);
+                        });
+                    }
+                });
             }
 
             #[cfg(target_os = "macos")]
@@ -409,6 +540,11 @@ pub fn run() {
             if window.label() == "main" {
                 if let WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();
+                    if let Some(draft) = window.app_handle().try_state::<DraftStore>() {
+                        if let Err(err) = draft.flush() {
+                            eprintln!("luozi: draft flush on hide failed: {err}");
+                        }
+                    }
                     let _ = window.hide();
                 }
             }
@@ -420,6 +556,13 @@ pub fn run() {
             session_cancel,
             session_undo_last,
             session_status,
+            draft_state,
+            draft_save,
+            draft_undo,
+            draft_redo,
+            draft_clear,
+            draft_load_last,
+            draft_insert,
             run_focus_abc_probe,
             run_delivery_matrix_probe,
             run_overlay_cycle_probe,
@@ -435,7 +578,7 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn m0_macos_fallback_does_not_enable_private_api() {
+    fn overlay_transparency_uses_macos_private_api() {
         let config: serde_json::Value =
             serde_json::from_str(include_str!("../tauri.conf.json")).expect("valid Tauri config");
         let private_api = config
@@ -443,18 +586,6 @@ mod tests {
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(false);
         let cargo_manifest = include_str!("../Cargo.toml");
-
-        assert!(!private_api, "M0 must not enable app.macOSPrivateApi");
-        assert!(
-            !cargo_manifest.contains("macos-private-api"),
-            "M0 must not compile Tauri's macos-private-api feature"
-        );
-    }
-
-    #[test]
-    fn m0_overlay_uses_opaque_fallback_without_private_api() {
-        let config: serde_json::Value =
-            serde_json::from_str(include_str!("../tauri.conf.json")).expect("valid Tauri config");
         let overlay = config
             .pointer("/app/windows")
             .and_then(serde_json::Value::as_array)
@@ -465,12 +596,20 @@ mod tests {
             })
             .expect("overlay window");
 
+        assert!(
+            private_api,
+            "rounded HUD requires app.macOSPrivateApi for real window transparency"
+        );
+        assert!(
+            cargo_manifest.contains("macos-private-api"),
+            "rounded HUD requires Tauri macos-private-api feature"
+        );
         assert_eq!(
             overlay
                 .get("transparent")
                 .and_then(serde_json::Value::as_bool),
-            Some(false),
-            "M0 fallback must use an opaque window until a public native material bridge exists"
+            Some(true),
+            "overlay must be transparent so the HUD pill can have rounded corners"
         );
     }
 }

@@ -5,6 +5,8 @@ import { resolve } from "node:path";
 const host = process.env.TAURI_DEV_HOST;
 
 export default defineConfig({
+  // Relative asset URLs — absolute `/assets/...` white-screens in packaged .app.
+  base: "./",
   clearScreen: false,
   envPrefix: ["VITE_", "TAURI_"],
   server: {

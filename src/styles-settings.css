@@ -26,17 +26,6 @@
   line-height: 1.55;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0a1f22;
-    --panel: color-mix(in srgb, #122f33 88%, transparent);
-    --line: color-mix(in srgb, var(--ice-white) 14%, transparent);
-    --text: var(--ice-white);
-    --muted: color-mix(in srgb, var(--ice-white) 62%, transparent);
-    --accent: var(--aurora-cyan);
-  }
-}
-
 * {
   box-sizing: border-box;
 }
@@ -102,12 +91,6 @@ body.settings-body {
   color: var(--night-teal);
 }
 
-@media (prefers-color-scheme: dark) {
-  .settings-section h1 {
-    color: var(--ice-white);
-  }
-}
-
 .settings-section h2 {
   margin: 22px 0 10px;
   font-size: 15px;
@@ -149,13 +132,6 @@ button {
   padding: 7px 12px;
   font-size: 13px;
   cursor: pointer;
-}
-
-@media (prefers-color-scheme: dark) {
-  button {
-    border-color: color-mix(in srgb, var(--ice-white) 18%, transparent);
-    background: color-mix(in srgb, #1a3a3e 70%, transparent);
-  }
 }
 
 button:hover:not(:disabled) {

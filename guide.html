@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>落字 · 如何使用</title>
+  </head>
+  <body class="settings-body">
+    <div class="settings-shell guide-shell">
+      <nav class="settings-nav" aria-label="教程章节">
+        <button type="button" class="nav-item active" data-section="start">快速开始</button>
+        <button type="button" class="nav-item" data-section="hotkeys">快捷键</button>
+        <button type="button" class="nav-item" data-section="draft">语音草稿</button>
+        <button type="button" class="nav-item" data-section="voice-edit">说出修改</button>
+        <button type="button" class="nav-item" data-section="settings">设置与权限</button>
+        <button type="button" class="nav-item" data-section="faq">常见问题</button>
+      </nav>
+      <div class="guide-column">
+        <main class="settings-main">
+          <section id="section-start" class="settings-section">
+            <h1>快速开始</h1>
+            <p class="muted">（正文 Task 3 填写）</p>
+          </section>
+          <section id="section-hotkeys" class="settings-section" hidden>
+            <h1>快捷键</h1>
+          </section>
+          <section id="section-draft" class="settings-section" hidden>
+            <h1>语音草稿</h1>
+          </section>
+          <section id="section-voice-edit" class="settings-section" hidden>
+            <h1>说出修改</h1>
+          </section>
+          <section id="section-settings" class="settings-section" hidden>
+            <h1>设置与权限</h1>
+          </section>
+          <section id="section-faq" class="settings-section" hidden>
+            <h1>常见问题</h1>
+          </section>
+        </main>
+        <footer class="guide-footer">
+          <button type="button" id="btnOpenSettings">打开设置…</button>
+        </footer>
+      </div>
+    </div>
+    <script type="module" src="/src/guide.ts"></script>
+  </body>
+</html>

@@ -5,8 +5,9 @@ use std::sync::Mutex;
 use std::time::Instant;
 
 use luozi_core::{
-    route_asr, route_asr_after_local_failure, route_delivery, AppConfig, AsrBackendChoice, AsrMode,
-    DeliveryAction, SessionCommand, SessionEffect, SessionMachine, SessionPhase, TargetValidation,
+    assess_edit_risk, resolve_edit_scope, route_asr, route_asr_after_local_failure, route_delivery,
+    AppConfig, AsrBackendChoice, AsrMode, DeliveryAction, EditRisk, SessionCommand, SessionEffect,
+    SessionMachine, SessionPhase, TargetValidation,
 };
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -20,6 +21,13 @@ use super::recorder::{SessionRecorder, MAX_RECORDING_MS};
 /// Kept for docs/tests that mention the M2 placeholder string.
 #[allow(dead_code)]
 pub const FAKE_TRANSCRIPT: &str = "落字测试";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum SessionIntent {
+    #[default]
+    Continue,
+    VoiceEdit,
+}
 
 /// Whisper + deliver must not hang the session forever (stuck busy overlay).
 const TRANSCRIBE_WATCHDOG_MS: u64 = 45_000;
@@ -52,6 +60,8 @@ pub struct AppSessionState {
     pub source_pid: Mutex<Option<i32>>,
     /// Model download in flight (tray debounce).
     pub model_fetching: AtomicBool,
+    /// Continue dictation vs voice-edit instruction (M7).
+    pub intent: Mutex<SessionIntent>,
     #[allow(dead_code)]
     pub config: AppConfig,
 }
@@ -69,6 +79,7 @@ impl Default for AppSessionState {
             hold_active: AtomicBool::new(false),
             source_pid: Mutex::new(None),
             model_fetching: AtomicBool::new(false),
+            intent: Mutex::new(SessionIntent::Continue),
             config: super::config_store::load(),
         }
     }
@@ -275,6 +286,40 @@ fn finish_transcribe_async(
                 return;
             }
         };
+
+        let intent = state
+            .intent
+            .lock()
+            .ok()
+            .map(|g| *g)
+            .unwrap_or(SessionIntent::Continue);
+        let _ = state
+            .intent
+            .lock()
+            .map(|mut g| *g = SessionIntent::Continue);
+
+        if intent == SessionIntent::VoiceEdit {
+            // Consume session machine so we leave busy state, then apply text AI to draft.
+            let _ = {
+                let Ok(mut machine) = state.machine.lock() else {
+                    return;
+                };
+                machine.handle(SessionCommand::TranscriptionReady {
+                    session_id,
+                    text: transcript.clone(),
+                })
+            };
+            // Force idle regardless of delivery effect.
+            let _ = state.machine.lock().map(|mut m| {
+                m.handle(SessionCommand::DeliveryFinished {
+                    session_id,
+                    ok: true,
+                })
+            });
+            disarm_escape(&app);
+            apply_voice_edit(&app, &state, &cfg, &transcript);
+            return;
+        }
 
         let deliver_effect = {
             let Ok(mut machine) = state.machine.lock() else {
@@ -555,6 +600,149 @@ fn draft_window_is_front(app: &AppHandle) -> bool {
         return false;
     };
     main.is_visible().unwrap_or(false) && main.is_focused().unwrap_or(false)
+}
+
+fn map_text_ai_err(err: &str) -> &'static str {
+    match err {
+        "text_ai_not_consented" | "cloud_not_consented" => "文本 AI 未授权",
+        "text_ai_unauthorized" | "cloud_unauthorized" => "文本 AI Key 无效",
+        "text_ai_timeout" => "文本 AI 超时",
+        "text_ai_not_configured" | "text_ai_not_ready" => "请先配置文本 AI",
+        "edit_scope_invalid" => "修改范围无效",
+        "text_ai_invalid_patch" => "AI 返回无效",
+        _ => "文本 AI 失败",
+    }
+}
+
+fn apply_voice_edit(app: &AppHandle, _state: &AppSessionState, cfg: &AppConfig, instruction: &str) {
+    let instruction = instruction.trim();
+    if instruction.is_empty() {
+        emit_transient(app, "error", "没听清修改要求");
+        return;
+    }
+
+    let Some(draft) = app.try_state::<super::DraftStore>() else {
+        emit_transient(app, "error", "草稿不可用");
+        return;
+    };
+
+    if draft.is_empty() {
+        emit_transient(app, "error", "先说一段或粘贴文字");
+        return;
+    }
+
+    if !super::text_ai::text_ai_ready(&cfg.text_ai) {
+        emit_transient(app, "error", "请先配置并同意文本 AI");
+        return;
+    }
+
+    let text = draft.text_snapshot();
+    let (sel_start, sel_end) = draft.selection();
+    let scope = match resolve_edit_scope(&text, sel_start, sel_end, instruction) {
+        Ok(s) => s,
+        Err(err) => {
+            emit_transient(app, "error", map_text_ai_err(&err));
+            return;
+        }
+    };
+    let original = text[scope.start..scope.end].to_string();
+    if original.trim().is_empty() {
+        emit_transient(app, "error", "没有可修改的内容");
+        return;
+    }
+
+    emit_phase(app, "transcribing", "正在修改…");
+    show_overlay(app, true);
+
+    let proposed = match super::text_ai::rewrite_scope(&cfg.text_ai, instruction, &original) {
+        Ok(p) => p,
+        Err(err) => {
+            eprintln!("luozi: text_ai failed: {err}");
+            emit_transient(app, "error", map_text_ai_err(&err));
+            return;
+        }
+    };
+
+    if proposed == original {
+        emit_transient(app, "inserted", "无需修改");
+        return;
+    }
+
+    match assess_edit_risk(&scope, &original, &proposed, instruction) {
+        EditRisk::Low => match draft.insert_at(scope.start, scope.end, &proposed) {
+            Ok(_) => {
+                let _ = app.emit("draft://updated", serde_json::json!({ "reason": "voice_edit" }));
+                emit_transient(app, "inserted", "已修改");
+            }
+            Err(err) => {
+                eprintln!("luozi: apply edit failed: {err}");
+                emit_transient(app, "error", "写入草稿失败");
+            }
+        },
+        EditRisk::High { reasons } => {
+            let reason_labels: Vec<String> = reasons.iter().map(|r| (*r).to_string()).collect();
+            draft.set_pending(super::draft::PendingEdit {
+                start: scope.start,
+                end: scope.end,
+                proposed: proposed.clone(),
+                reasons: reason_labels.clone(),
+                original: original.clone(),
+            });
+            let preview: String = proposed.chars().take(80).collect();
+            let _ = app.emit(
+                "draft://edit-preview",
+                serde_json::json!({
+                    "reasons": reason_labels,
+                    "originalPreview": original.chars().take(80).collect::<String>(),
+                    "proposedPreview": preview,
+                }),
+            );
+            emit_transient(app, "confirm", "高风险修改：请在草稿窗确认");
+        }
+    }
+}
+
+/// Open draft, ensure content, then start hold-to-talk as a voice-edit session.
+pub fn start_voice_edit_session(
+    app: &AppHandle,
+    state: &AppSessionState,
+) -> Result<SessionStatus, String> {
+    // Show workbench first.
+    if let Some(main) = app.get_webview_window("main") {
+        let _ = main.show();
+        let _ = main.set_focus();
+    }
+
+    if let Some(draft) = app.try_state::<super::DraftStore>() {
+        if draft.is_empty() {
+            let _ = draft.load_last_into_draft();
+            let _ = app.emit(
+                "draft://updated",
+                serde_json::json!({ "reason": "load_last" }),
+            );
+        }
+        if draft.is_empty() {
+            emit_transient(app, "error", "先说一段或粘贴文字");
+            return Err("draft_empty".into());
+        }
+    }
+
+    let _ = state
+        .intent
+        .lock()
+        .map(|mut g| *g = SessionIntent::VoiceEdit);
+    start_session(app, state)
+}
+
+pub fn start_continue_session(
+    app: &AppHandle,
+    state: &AppSessionState,
+) -> Result<SessionStatus, String> {
+    let _ = state
+        .intent
+        .lock()
+        .map(|mut g| *g = SessionIntent::Continue);
+    start_session(app, state)
 }
 
 fn apply_delivery(app: &AppHandle, state: &AppSessionState, text: &str) -> DeliveryResult {
@@ -860,6 +1048,54 @@ pub fn prompt_and_store_groq_key(app: &AppHandle) -> Result<(), String> {
     }
 }
 
+/// Prompt for text AI API key (macOS) and store in Keychain (separate from ASR).
+pub fn prompt_and_store_text_ai_key(app: &AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let script = r#"
+        set answer to display dialog "粘贴文本 AI API Key（Groq/OpenAI 兼容；仅存本机钥匙串）" default answer "" with hidden answer buttons {"取消", "保存"} default button "保存"
+        if button returned of answer is "取消" then return ""
+        return text returned of answer
+        "#;
+        let out = std::process::Command::new("osascript")
+            .args(["-e", script])
+            .output()
+            .map_err(|e| format!("osascript_failed: {e}"))?;
+        if !out.status.success() {
+            return Err("canceled".into());
+        }
+        let key = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if key.is_empty() {
+            return Err("canceled".into());
+        }
+        let cfg = super::config_store::load();
+        super::credentials::set_secret(&cfg.text_ai.credential_ref, &key)?;
+        let _ = super::config_store::update(|c| {
+            if c.text_ai.provider_id.is_empty() {
+                c.text_ai = luozi_core::TextAiConfig::default();
+            }
+        });
+        emit_transient(app, "inserted", "文本 AI Key 已写入钥匙串");
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        Err("keychain_unsupported_platform".into())
+    }
+}
+
+pub fn consent_current_text_ai(app: &AppHandle) -> Result<(), String> {
+    let cfg = super::config_store::load();
+    let host = cfg
+        .text_ai
+        .host()
+        .ok_or_else(|| "text_ai_protocol_error".to_string())?;
+    super::consent::grant(&cfg.text_ai.provider_id, &host)?;
+    emit_transient(app, "inserted", &format!("已同意文本 AI 上传到 {host}"));
+    Ok(())
+}
+
 pub fn note_hold_pressed(state: &AppSessionState) {
     state.hold_active.store(true, Ordering::SeqCst);
 }
@@ -968,7 +1204,17 @@ pub fn start_session_with_token(
             let _ = state.source_target.lock().map(|mut g| *g = Some(token));
             show_overlay(app, true);
             arm_escape(app);
-            emit_phase(app, "recording", "听写中 · Esc 取消");
+            let editing = state
+                .intent
+                .lock()
+                .ok()
+                .map(|g| *g == SessionIntent::VoiceEdit)
+                .unwrap_or(false);
+            if editing {
+                emit_phase(app, "recording_edit", "说修改要求… · Esc 取消");
+            } else {
+                emit_phase(app, "recording", "听写中 · Esc 取消");
+            }
 
             // Best-effort focus capture in background (never blocks start).
             let app_cap = app.clone();

@@ -6,7 +6,7 @@ const label = document.querySelector(".label");
 const root = document.querySelector(".overlay");
 
 /** Phases that keep the HUD up until the session ends. */
-const STICKY = new Set(["recording", "transcribing", "delivering"]);
+const STICKY = new Set(["recording", "recording_edit", "transcribing", "delivering"]);
 const AUTO_HIDE_MS = 2200;
 
 let hideTimer: ReturnType<typeof setTimeout> | undefined;

@@ -62,6 +62,21 @@ pub fn get_secret(account: &str) -> Result<String, String> {
             }
         }
     }
+    if account == "textai.groq" {
+        if let Ok(v) = std::env::var("LUOZI_TEXT_AI_API_KEY") {
+            let t = v.trim().to_string();
+            if !t.is_empty() {
+                return Ok(t);
+            }
+        }
+        // Allow reusing Groq ASR key for text AI in local dev when text key unset.
+        if let Ok(v) = std::env::var("LUOZI_GROQ_API_KEY") {
+            let t = v.trim().to_string();
+            if !t.is_empty() {
+                return Ok(t);
+            }
+        }
+    }
     #[cfg(target_os = "macos")]
     {
         let out = Command::new("security")

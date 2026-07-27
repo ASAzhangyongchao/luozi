@@ -13,6 +13,7 @@ type DraftState = {
 
 type AppConfig = {
   continueSpeakingShortcut: string;
+  voiceEditShortcut: string;
   shortcutsProvisional: boolean;
 };
 
@@ -25,6 +26,26 @@ const statusEl = () => document.querySelector<HTMLParagraphElement>("#status")!;
 const btnUndo = () => document.querySelector<HTMLButtonElement>("#btnUndo")!;
 const btnRedo = () => document.querySelector<HTMLButtonElement>("#btnRedo")!;
 const btnLoadLast = () => document.querySelector<HTMLButtonElement>("#btnLoadLast")!;
+
+/** Convert UTF-16 textarea offset → UTF-8 byte offset for Rust string slicing. */
+function utf8ByteOffset(text: string, utf16Index: number): number {
+  const encoder = new TextEncoder();
+  let u16 = 0;
+  let bytes = 0;
+  for (const ch of text) {
+    if (u16 >= utf16Index) break;
+    u16 += ch.length;
+    bytes += encoder.encode(ch).length;
+  }
+  return bytes;
+}
+
+function reportSelection() {
+  const el = editor();
+  const start = utf8ByteOffset(el.value, el.selectionStart);
+  const end = utf8ByteOffset(el.value, el.selectionEnd);
+  void invoke("draft_set_selection", { start, end });
+}
 
 function applyState(st: DraftState) {
   applyingRemote = true;
@@ -40,6 +61,7 @@ function applyState(st: DraftState) {
   btnRedo().disabled = !st.canRedo;
   btnLoadLast().hidden = !st.hasLastTranscript;
   applyingRemote = false;
+  reportSelection();
 }
 
 async function refresh() {
@@ -89,13 +111,22 @@ async function main() {
     const cfg = await invoke<AppConfig>("get_app_config");
     const hint = document.querySelector("#hotkeyHint");
     if (hint) hint.textContent = cfg.continueSpeakingShortcut;
+    const editHint = document.querySelector("#editHotkeyHint");
+    if (editHint) editHint.textContent = cfg.voiceEditShortcut;
   } catch {
     /* ignore */
   }
 
   await refresh();
 
-  editor().addEventListener("input", () => scheduleSave());
+  editor().addEventListener("input", () => {
+    scheduleSave();
+    reportSelection();
+  });
+  editor().addEventListener("keyup", () => reportSelection());
+  editor().addEventListener("mouseup", () => reportSelection());
+  editor().addEventListener("select", () => reportSelection());
+  editor().addEventListener("focus", () => reportSelection());
 
   btnUndo().addEventListener("click", async () => {
     await flushNow();
@@ -129,14 +160,33 @@ async function main() {
     }
   });
 
-  await listen("draft://updated", async () => {
+  await listen("draft://updated", async (ev) => {
     await refresh();
-    statusEl().textContent = "已写入草稿";
+    const reason = (ev.payload as { reason?: string } | null)?.reason;
+    statusEl().textContent =
+      reason === "voice_edit" ? "已修改" : reason === "load_last" ? "已载入最近落字" : "已写入草稿";
+  });
+
+  await listen<{
+    reasons: string[];
+    originalPreview: string;
+    proposedPreview: string;
+  }>("draft://edit-preview", async (ev) => {
+    const { reasons, originalPreview, proposedPreview } = ev.payload;
+    const ok = confirm(
+      `高风险修改（${reasons.join(", ")}）\n\n原文：${originalPreview}\n\n改为：${proposedPreview}\n\n应用此修改？`,
+    );
+    if (ok) {
+      applyState(await invoke("draft_apply_pending"));
+      statusEl().textContent = "已应用修改";
+    } else {
+      await invoke("draft_reject_pending");
+      statusEl().textContent = "已取消修改";
+    }
   });
 
   const win = getCurrentWindow();
   await win.onCloseRequested(async (event) => {
-    // Rust also prevents close + flush; this is belt-and-suspenders for pending edits.
     event.preventDefault();
     await flushNow();
     await win.hide();

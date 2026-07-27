@@ -63,6 +63,22 @@ fn draft_insert(
     draft.insert_at(start, end, &text)
 }
 
+#[tauri::command]
+fn draft_set_selection(start: usize, end: usize, draft: tauri::State<'_, DraftStore>) {
+    draft.set_selection(start, end);
+}
+
+#[tauri::command]
+fn draft_apply_pending(draft: tauri::State<'_, DraftStore>) -> Result<DraftStateDto, String> {
+    draft.apply_pending()
+}
+
+#[tauri::command]
+fn draft_reject_pending(draft: tauri::State<'_, DraftStore>) -> Result<(), String> {
+    draft.clear_pending();
+    Ok(())
+}
+
 fn show_draft(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.set_title("落字 · 语音草稿");
@@ -125,7 +141,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         app,
         "voice_edit",
         "说出修改要求",
-        false,
+        true,
         Some(cfg.voice_edit_shortcut.as_str()),
     )?;
     let cancel = MenuItem::with_id(app, "cancel", "取消当前录音", true, Some("Escape"))?;
@@ -153,11 +169,25 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         true,
         None::<&str>,
     )?;
-    let groq_key = MenuItem::with_id(app, "groq_key", "配置 Groq Key…", true, None::<&str>)?;
+    let groq_key = MenuItem::with_id(app, "groq_key", "配置 Groq ASR Key…", true, None::<&str>)?;
     let groq_consent = MenuItem::with_id(
         app,
         "groq_consent",
-        "同意上传到 Groq…",
+        "同意 ASR 上传到 Groq…",
+        true,
+        None::<&str>,
+    )?;
+    let text_ai_key = MenuItem::with_id(
+        app,
+        "text_ai_key",
+        "配置文本 AI Key…",
+        true,
+        None::<&str>,
+    )?;
+    let text_ai_consent = MenuItem::with_id(
+        app,
+        "text_ai_consent",
+        "同意文本 AI 上传…",
         true,
         None::<&str>,
     )?;
@@ -194,6 +224,8 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             &fetch_model,
             &groq_key,
             &groq_consent,
+            &text_ai_key,
+            &text_ai_consent,
             &mode,
             &sep_prefs,
             &practice,
@@ -214,7 +246,14 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             "draft" => show_draft(app),
             "about" => show_about(app),
             "start" => with_session(app, |s| {
-                let _ = session::controller::start_session(app, s);
+                let _ = session::controller::start_continue_session(app, s);
+            }),
+            "voice_edit" => with_session(app, |s| {
+                if let Err(err) = session::controller::start_voice_edit_session(app, s) {
+                    if err != "draft_empty" {
+                        eprintln!("luozi: voice_edit start failed: {err}");
+                    }
+                }
             }),
             "cancel" => with_session(app, |s| {
                 let _ = session::controller::cancel_session(app, s);
@@ -240,6 +279,18 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             "groq_consent" => {
                 if let Err(err) = session::controller::consent_current_cloud(app) {
                     eprintln!("luozi: consent failed: {err}");
+                }
+            }
+            "text_ai_key" => {
+                if let Err(err) = session::controller::prompt_and_store_text_ai_key(app) {
+                    if err != "canceled" {
+                        eprintln!("luozi: text ai key failed: {err}");
+                    }
+                }
+            }
+            "text_ai_consent" => {
+                if let Err(err) = session::controller::consent_current_text_ai(app) {
+                    eprintln!("luozi: text ai consent failed: {err}");
                 }
             }
             "perms" => {
@@ -286,11 +337,12 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Register continue-speaking with a dedicated handler (do not also call `register`).
-/// Escape is registered only while a session is active; handled by Builder::with_handler.
+/// Register continue-speaking + voice-edit hold hotkeys.
+/// Escape is always-on via Builder::with_handler.
 fn register_session_shortcuts(app: &tauri::AppHandle) -> Result<String, String> {
     let cfg = session::config_store::load();
     let primary = cfg.continue_speaking_shortcut.clone();
+    let voice_edit = cfg.voice_edit_shortcut.clone();
     let candidates = [
         primary.as_str(),
         "Control+Alt+Period",
@@ -300,6 +352,7 @@ fn register_session_shortcuts(app: &tauri::AppHandle) -> Result<String, String> 
 
     let _ = app.global_shortcut().unregister_all();
 
+    let mut continue_registered: Option<String> = None;
     for raw in candidates {
         let sc: Shortcut = match raw.parse() {
             Ok(s) => s,
@@ -310,9 +363,6 @@ fn register_session_shortcuts(app: &tauri::AppHandle) -> Result<String, String> 
         };
 
         let hold = cfg.hold_to_talk;
-        // Carbon hotkeys already arrive on the AppKit main thread.
-        // NEVER call run_on_main_thread here — it deadlocks (beachball).
-        // Capture AX on this main-thread callback; open the mic on a worker.
         match app.global_shortcut().on_shortcut(sc, move |app, shortcut, event| {
             eprintln!(
                 "luozi: hotkey {} {:?}",
@@ -323,12 +373,10 @@ fn register_session_shortcuts(app: &tauri::AppHandle) -> Result<String, String> 
             let state = event.state;
             match state {
                 ShortcutState::Pressed => {
-                    // Do NOT capture AX on this callback thread — prompt/AX work
-                    // on the main thread beachballs the app (Esc dies, overlay stuck).
                     std::thread::spawn(move || {
                         with_session(&app, |s| {
                             session::controller::note_hold_pressed(s);
-                            if let Err(err) = session::controller::start_session(&app, s) {
+                            if let Err(err) = session::controller::start_continue_session(&app, s) {
                                 eprintln!("luozi: session_start failed: {err}");
                             }
                         });
@@ -337,7 +385,6 @@ fn register_session_shortcuts(app: &tauri::AppHandle) -> Result<String, String> 
                 ShortcutState::Released if hold => {
                     std::thread::spawn(move || {
                         with_session(&app, |s| {
-                            // Always clear hold first — start() may still be blocked on mic TCC.
                             session::controller::note_hold_released(s);
                             if !session::controller::wait_until_recording(s, 800) {
                                 eprintln!(
@@ -356,28 +403,87 @@ fn register_session_shortcuts(app: &tauri::AppHandle) -> Result<String, String> 
         }) {
             Ok(()) => {
                 eprintln!("luozi: continue-speaking shortcut registered: {raw}");
+                continue_registered = Some(raw.to_string());
                 if let Some(state) = app.try_state::<AppSessionState>() {
                     if let Ok(mut slot) = state.registered_continue.lock() {
                         *slot = Some(raw.to_string());
                     }
                 }
-                // Escape must stay registered for the whole process — session-scoped
-                // register from a worker was racy and failed while the UI was stuck.
-                if let Ok(esc) = "Escape".parse::<Shortcut>() {
-                    match app.global_shortcut().register(esc) {
-                        Ok(()) => eprintln!("luozi: Escape armed (always-on cancel)"),
-                        Err(e) => eprintln!("luozi: Escape register failed: {e}"),
-                    }
-                }
-                return Ok(raw.to_string());
+                break;
             }
             Err(e) => eprintln!("luozi: on_shortcut({raw}) failed: {e}"),
         }
     }
 
-    Err(
-        "Unable to register continue-speaking hotkey; use tray 「开始语音输入」".into(),
-    )
+    // Voice-edit second hotkey (M7).
+    let voice_candidates = [voice_edit.as_str(), "Control+Alt+M", "Control+Alt+Shift+M"];
+    for raw in voice_candidates {
+        if continue_registered.as_deref() == Some(raw) {
+            continue;
+        }
+        let sc: Shortcut = match raw.parse() {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("luozi: skip bad voice-edit shortcut {raw}: {e}");
+                continue;
+            }
+        };
+        let hold = cfg.hold_to_talk;
+        match app.global_shortcut().on_shortcut(sc, move |app, shortcut, event| {
+            eprintln!(
+                "luozi: voice-edit hotkey {} {:?}",
+                shortcut.into_string(),
+                event.state
+            );
+            let app = app.clone();
+            match event.state {
+                ShortcutState::Pressed => {
+                    std::thread::spawn(move || {
+                        with_session(&app, |s| {
+                            session::controller::note_hold_pressed(s);
+                            if let Err(err) = session::controller::start_voice_edit_session(&app, s)
+                            {
+                                if err != "draft_empty" {
+                                    eprintln!("luozi: voice_edit start failed: {err}");
+                                }
+                            }
+                        });
+                    });
+                }
+                ShortcutState::Released if hold => {
+                    std::thread::spawn(move || {
+                        with_session(&app, |s| {
+                            session::controller::note_hold_released(s);
+                            if !session::controller::wait_until_recording(s, 800) {
+                                return;
+                            }
+                            if let Err(err) = session::controller::stop_session(&app, s) {
+                                eprintln!("luozi: voice_edit stop failed: {err}");
+                            }
+                        });
+                    });
+                }
+                _ => {}
+            }
+        }) {
+            Ok(()) => {
+                eprintln!("luozi: voice-edit shortcut registered: {raw}");
+                break;
+            }
+            Err(e) => eprintln!("luozi: voice-edit on_shortcut({raw}) failed: {e}"),
+        }
+    }
+
+    if let Ok(esc) = "Escape".parse::<Shortcut>() {
+        match app.global_shortcut().register(esc) {
+            Ok(()) => eprintln!("luozi: Escape armed (always-on cancel)"),
+            Err(e) => eprintln!("luozi: Escape register failed: {e}"),
+        }
+    }
+
+    continue_registered.ok_or_else(|| {
+        "Unable to register continue-speaking hotkey; use tray 「开始语音输入」".into()
+    })
 }
 
 fn shortcut_escape_handler(
@@ -563,6 +669,9 @@ pub fn run() {
             draft_clear,
             draft_load_last,
             draft_insert,
+            draft_set_selection,
+            draft_apply_pending,
+            draft_reject_pending,
             run_focus_abc_probe,
             run_delivery_matrix_probe,
             run_overlay_cycle_probe,

@@ -4,6 +4,7 @@
 
 ### Added
 
+- M7 voice edit (Mac shortest): second hotkey `Control+Alt+Shift+Space`, separate text-AI Keychain + consent, OpenAI-compatible chat rewrite, selection/paragraph scope, protected-token high-risk confirm
 - M6 draft workbench: autosave, 20-step undo/redo, copy/clear, last-transcript load, dictation into focused draft
 - M5 cloud ASR (Mac-first Groq): Keychain, per-provider consent, OpenAI-compatible `/audio/transcriptions`, local-first Auto routing
 - M4 model acquisition: embedded `models-manifest.json`, SHA256 verify, tray「下载推荐模型…」, `npm run fetch:model` checksum, idle Whisper unload (≥5m)
@@ -28,8 +29,9 @@
 
 ### Notes
 
-- No public release artifacts yet
+- No public release artifacts / installers yet
 - Shortcuts remain provisional (Mac-first Partial M0)
 - Build requires `cmake` for `whisper-rs-sys`
 - Model file is not in Git; cloud Key never enters config.json / git / logs
-- Full Settings UI is M8; M5 uses tray + Keychain + consent file
+- Full Settings UI is M8; M5/M7 use tray + Keychain + consent file
+- Text AI consent is separate from ASR consent even on the same host

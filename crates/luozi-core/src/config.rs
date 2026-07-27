@@ -7,6 +7,10 @@ pub const GROQ_PROVIDER_ID: &str = "groq";
 pub const GROQ_DEFAULT_BASE_URL: &str = "https://api.groq.com/openai/v1";
 pub const GROQ_DEFAULT_MODEL: &str = "whisper-large-v3-turbo";
 
+/// Text AI is a separate capability from ASR (spec §8.6); consent/key must not be shared silently.
+pub const GROQ_TEXT_AI_PROVIDER_ID: &str = "textai.groq";
+pub const GROQ_TEXT_AI_DEFAULT_MODEL: &str = "llama-3.3-70b-versatile";
+
 /// Where to send audio for ASR (spec §8.3).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -71,6 +75,34 @@ impl CloudAsrConfig {
     }
 }
 
+/// Text AI (chat) settings without secrets.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TextAiConfig {
+    pub provider_id: String,
+    pub base_url: String,
+    pub model: String,
+    /// Keychain account id, e.g. `textai.groq`.
+    pub credential_ref: String,
+}
+
+impl Default for TextAiConfig {
+    fn default() -> Self {
+        Self {
+            provider_id: GROQ_TEXT_AI_PROVIDER_ID.into(),
+            base_url: GROQ_DEFAULT_BASE_URL.into(),
+            model: GROQ_TEXT_AI_DEFAULT_MODEL.into(),
+            credential_ref: "textai.groq".into(),
+        }
+    }
+}
+
+impl TextAiConfig {
+    pub fn host(&self) -> Option<String> {
+        url_host(&self.base_url)
+    }
+}
+
 /// Extract host from an http(s) URL without pulling in a URL crate.
 pub fn url_host(base_url: &str) -> Option<String> {
     let rest = base_url
@@ -108,6 +140,9 @@ pub struct AppConfig {
     /// Active cloud preset (no API key).
     #[serde(default)]
     pub cloud_asr: CloudAsrConfig,
+    /// Text AI chat preset (no API key). Separate consent from ASR.
+    #[serde(default)]
+    pub text_ai: TextAiConfig,
 }
 
 impl Default for AppConfig {
@@ -115,12 +150,13 @@ impl Default for AppConfig {
         Self {
             schema_version: DEFAULT_SCHEMA_VERSION,
             continue_speaking_shortcut: "Control+Alt+Space".into(),
-            voice_edit_shortcut: "Control+Alt+M".into(),
+            voice_edit_shortcut: "Control+Alt+Shift+Space".into(),
             hold_to_talk: true,
             shortcuts_provisional: true,
             language: "auto".into(),
             asr_mode: AsrMode::Auto,
             cloud_asr: CloudAsrConfig::default(),
+            text_ai: TextAiConfig::default(),
         }
     }
 }
@@ -150,6 +186,15 @@ impl AppConfig {
         }
         if self.cloud_asr.credential_ref.trim().is_empty() {
             return Err("cloud_asr.credential_ref must not be empty".into());
+        }
+        if self.text_ai.provider_id.trim().is_empty() {
+            return Err("text_ai.provider_id must not be empty".into());
+        }
+        if self.text_ai.base_url.trim().is_empty() {
+            return Err("text_ai.base_url must not be empty".into());
+        }
+        if self.text_ai.credential_ref.trim().is_empty() {
+            return Err("text_ai.credential_ref must not be empty".into());
         }
         Ok(())
     }
@@ -195,6 +240,8 @@ mod tests {
         let cfg: AppConfig = serde_json::from_str(json).unwrap();
         assert_eq!(cfg.asr_mode, AsrMode::Auto);
         assert_eq!(cfg.cloud_asr.model, GROQ_DEFAULT_MODEL);
+        assert_eq!(cfg.text_ai.model, GROQ_TEXT_AI_DEFAULT_MODEL);
+        assert_eq!(cfg.voice_edit_shortcut, "Control+Alt+M");
     }
 
     #[test]

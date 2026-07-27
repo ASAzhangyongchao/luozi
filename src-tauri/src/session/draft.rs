@@ -1,4 +1,4 @@
-//! Draft persistence + last transcript TTL (M6).
+//! Draft persistence + last transcript TTL (M6) + selection / pending edit (M7).
 
 use std::fs;
 use std::path::PathBuf;
@@ -22,6 +22,22 @@ pub struct DraftStateDto {
     pub save_status: String,
 }
 
+#[derive(Clone, Debug, Default)]
+struct Selection {
+    /// UTF-8 byte offsets into draft text.
+    start: usize,
+    end: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct PendingEdit {
+    pub start: usize,
+    pub end: usize,
+    pub proposed: String,
+    pub reasons: Vec<String>,
+    pub original: String,
+}
+
 struct LastTranscript {
     text: String,
     at: Instant,
@@ -31,6 +47,8 @@ pub struct DraftStore {
     doc: Mutex<DraftDocument>,
     last: Mutex<Option<LastTranscript>>,
     dirty: Mutex<bool>,
+    selection: Mutex<Selection>,
+    pending: Mutex<Option<PendingEdit>>,
 }
 
 impl Default for DraftStore {
@@ -40,6 +58,8 @@ impl Default for DraftStore {
             doc: Mutex::new(DraftDocument::from_text(text)),
             last: Mutex::new(None),
             dirty: Mutex::new(false),
+            selection: Mutex::new(Selection::default()),
+            pending: Mutex::new(None),
         }
     }
 }
@@ -169,6 +189,7 @@ impl DraftStore {
             let mut doc = self.doc.lock().map_err(|_| "draft_lock_failed")?;
             doc.clear();
         }
+        let _ = self.pending.lock().map(|mut p| *p = None);
         self.flush()?;
         Ok(self.snapshot())
     }
@@ -215,7 +236,37 @@ impl DraftStore {
         Ok(self.snapshot())
     }
 
-    /// Insert transcript into draft at end (selection handled by frontend when open).
+    pub fn is_empty(&self) -> bool {
+        self.doc
+            .lock()
+            .ok()
+            .map(|d| d.text().trim().is_empty())
+            .unwrap_or(true)
+    }
+
+    pub fn text_snapshot(&self) -> String {
+        self.doc
+            .lock()
+            .ok()
+            .map(|d| d.text().to_string())
+            .unwrap_or_default()
+    }
+
+    /// UTF-8 byte offsets from the workbench textarea.
+    pub fn set_selection(&self, start: usize, end: usize) {
+        if let Ok(mut g) = self.selection.lock() {
+            *g = Selection { start, end };
+        }
+    }
+
+    pub fn selection(&self) -> (usize, usize) {
+        self.selection
+            .lock()
+            .ok()
+            .map(|g| (g.start, g.end))
+            .unwrap_or((0, 0))
+    }
+
     pub fn append_transcript(&self, chunk: &str) -> Result<(), String> {
         let chunk = chunk.trim();
         if chunk.is_empty() {
@@ -225,7 +276,6 @@ impl DraftStore {
             let mut doc = self.doc.lock().map_err(|_| "draft_lock_failed")?;
             let mut next = doc.text().to_string();
             if !next.is_empty() && !next.ends_with('\n') && !next.ends_with(' ') {
-                // Prefer paragraph break for consecutive dictation into draft.
                 next.push('\n');
             }
             next.push_str(chunk);
@@ -241,8 +291,28 @@ impl DraftStore {
             let mut doc = self.doc.lock().map_err(|_| "draft_lock_failed")?;
             doc.replace_range(start, end, chunk)?;
         }
-        self.remember_transcript(chunk);
         self.flush()?;
         Ok(self.snapshot())
+    }
+
+    pub fn set_pending(&self, pending: PendingEdit) {
+        if let Ok(mut g) = self.pending.lock() {
+            *g = Some(pending);
+        }
+    }
+
+    pub fn take_pending(&self) -> Option<PendingEdit> {
+        self.pending.lock().ok().and_then(|mut g| g.take())
+    }
+
+    pub fn clear_pending(&self) {
+        let _ = self.pending.lock().map(|mut g| *g = None);
+    }
+
+    pub fn apply_pending(&self) -> Result<DraftStateDto, String> {
+        let Some(p) = self.take_pending() else {
+            return Err("pending_edit_missing".into());
+        };
+        self.insert_at(p.start, p.end, &p.proposed)
     }
 }

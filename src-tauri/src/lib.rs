@@ -141,6 +141,11 @@ fn open_settings_window(app: tauri::AppHandle, section: Option<String>) {
 }
 
 #[tauri::command]
+fn open_guide_window(app: tauri::AppHandle) {
+    show_guide(&app);
+}
+
+#[tauri::command]
 fn settings_take_nav() -> Option<String> {
     session::settings_api::take_pending_section()
 }
@@ -722,6 +727,7 @@ pub fn run() {
             settings_open_releases,
             settings_open_spike,
             open_settings_window,
+            open_guide_window,
             settings_take_nav,
             run_focus_abc_probe,
             run_delivery_matrix_probe,

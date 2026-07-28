@@ -6,7 +6,32 @@
     <title>落字 · 语音草稿</title>
   </head>
   <body>
-    <div class="workbench" id="workbench">
+    <div class="app-shell">
+      <aside class="app-rail" aria-label="主导航">
+        <nav class="rail-nav">
+          <button type="button" class="rail-item active" data-nav="draft" title="语音草稿" aria-current="page">
+            <span class="rail-icon" aria-hidden="true">✎</span>
+            <span class="rail-label">草稿</span>
+          </button>
+          <button type="button" class="rail-item" data-nav="history" title="落字历史（即将推出）" disabled>
+            <span class="rail-icon" aria-hidden="true">☰</span>
+            <span class="rail-label">历史</span>
+          </button>
+        </nav>
+        <div class="rail-spacer"></div>
+        <div class="rail-footer">
+          <button type="button" class="rail-item" id="btnRailSettings" title="设置">
+            <span class="rail-icon" aria-hidden="true">⚙</span>
+            <span class="rail-label">设置</span>
+          </button>
+          <button type="button" class="rail-item" id="btnRailGuide" title="如何使用">
+            <span class="rail-icon" aria-hidden="true">?</span>
+            <span class="rail-label">教程</span>
+          </button>
+        </div>
+      </aside>
+
+      <div class="workbench" id="workbench">
       <header class="wb-toolbar">
         <div class="wb-brand">
           <img class="brand-mark" src="./assets/brand/luozi-mark.svg" width="28" height="28" alt="" />
@@ -37,6 +62,7 @@
         </p>
         <p id="status" class="wb-status">就绪</p>
       </footer>
+      </div>
     </div>
 
     <section class="spike-panel" id="spikePanel" hidden>

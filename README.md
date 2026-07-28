@@ -8,7 +8,7 @@ Cross-platform voice-to-text desktop app (Tauri 2 + Rust).
 
 - Hold `Control+Alt+Space`: transcript → draft when workbench focused, else AX / clipboard
 - Hold `Control+Alt+Shift+Space`: speak an edit instruction → text AI rewrites the draft scope
-- Tray: **left-click** opens draft; **right-click** menu has Settings / How to use / engine. Dock click also opens draft.
+- Tray: **left-click** opens draft; **right-click** menu has Settings / How to use / engine. Dock click also opens draft. Draft left rail also opens Settings and the How-to guide.
 - Manual checklists: `docs/spikes/m5-manual.md` … `m8-manual.md`, `guide-manual.md`
 
 **Cloud:** ASR and text AI require separate consent; keys only in Keychain.

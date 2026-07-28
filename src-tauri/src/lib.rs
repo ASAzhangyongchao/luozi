@@ -272,7 +272,7 @@ fn build_tray(
     let engine = MenuItem::with_id(
         app,
         "engine",
-        &format!("转写：{}", cfg.asr_mode.label_zh()),
+        format!("转写：{}", cfg.asr_mode.label_zh()),
         false,
         None::<&str>,
     )?;

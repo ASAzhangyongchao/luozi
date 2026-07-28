@@ -486,8 +486,10 @@ mod tests {
 
     #[test]
     fn unsupported_not_ready() {
-        let mut cfg = CloudAsrConfig::default();
-        cfg.protocol = AsrProtocol::Unsupported;
+        let cfg = CloudAsrConfig {
+            protocol: AsrProtocol::Unsupported,
+            ..Default::default()
+        };
         assert!(!cloud_ready(&cfg));
     }
 }

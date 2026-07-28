@@ -882,8 +882,24 @@ fn undo_feedback() -> (&'static str, &'static str) {
     ("undone", "已撤销剪贴板落字")
 }
 
+fn should_emit_transient(session_id: Option<u64>, machine_is_idle: bool) -> bool {
+    session_id.is_some() || machine_is_idle
+}
+
 /// Show overlay with a short-lived status, then hide (does not block).
 fn emit_transient(app: &AppHandle, session_id: Option<u64>, phase: &str, message: &str) {
+    if session_id.is_none() {
+        let Some(state) = app.try_state::<AppSessionState>() else {
+            return;
+        };
+        let Ok(machine) = state.machine.lock() else {
+            return;
+        };
+        if !should_emit_transient(session_id, machine.is_idle()) {
+            return;
+        }
+    }
+
     let Some(command) = emit_phase(app, session_id, phase, message) else {
         return;
     };
@@ -2587,7 +2603,8 @@ pub fn session_status(state: State<'_, AppSessionState>) -> Result<SessionStatus
 #[cfg(test)]
 mod hud_tests {
     use super::{
-        hud_phase_payload, transient_duration_ms, undo_feedback, HudCommand, HudLifecycle,
+        hud_phase_payload, should_emit_transient, transient_duration_ms, undo_feedback, HudCommand,
+        HudLifecycle,
     };
 
     #[test]
@@ -2647,6 +2664,13 @@ mod hud_tests {
     #[test]
     fn undo_uses_transient_feedback_phase() {
         assert_eq!(undo_feedback(), ("undone", "已撤销剪贴板落字"));
+    }
+
+    #[test]
+    fn global_transient_cannot_take_over_an_active_session() {
+        assert!(!should_emit_transient(None, false));
+        assert!(should_emit_transient(None, true));
+        assert!(should_emit_transient(Some(42), false));
     }
 
     #[test]

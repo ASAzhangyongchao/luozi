@@ -59,7 +59,15 @@ export function reduceHudState(current: HudState, event: HudEvent): HudState {
     return current;
   }
 
-  const sessionId = event.sessionId ?? current.sessionId;
+  if (
+    event.sessionId === null &&
+    current.sessionId !== null &&
+    (current.kind === "listening" || current.kind === "processing")
+  ) {
+    return current;
+  }
+
+  const sessionId = event.sessionId;
   const phaseRevision = current.phaseRevision + 1;
   switch (event.phase) {
     case "recording":

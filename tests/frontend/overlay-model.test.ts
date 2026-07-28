@@ -33,7 +33,7 @@ describe("HUD state reducer", () => {
     expect(error.kind).toBe("error");
   });
 
-  it("ignores events from an older session and inherits a null session id", () => {
+  it("ignores events from an older session", () => {
     const current = reduceHudState(initialHudState, {
       phase: "recording",
       message: "new",
@@ -45,13 +45,49 @@ describe("HUD state reducer", () => {
       sessionId: 8,
     });
     expect(stale).toEqual(current);
+  });
 
-    const inherited = reduceHudState(current, {
-      phase: "transcribing",
-      message: "processing",
+  it("keeps active listening and processing HUDs when global feedback races them", () => {
+    const listening = reduceHudState(initialHudState, {
+      phase: "recording",
+      message: "listening",
+      sessionId: 42,
+    });
+    const globalUndo = reduceHudState(listening, {
+      phase: "undone",
+      message: "已撤销",
       sessionId: null,
     });
-    expect(inherited.sessionId).toBe(9);
+    expect(globalUndo).toEqual(listening);
+
+    const processing = reduceHudState(listening, {
+      phase: "transcribing",
+      message: "processing",
+      sessionId: 42,
+    });
+    const globalModelWork = reduceHudState(processing, {
+      phase: "transcribing",
+      message: "正在下载推荐模型…",
+      sessionId: null,
+    });
+    expect(globalModelWork).toEqual(processing);
+  });
+
+  it("shows global feedback with a null session after session activity ends", () => {
+    const success = reduceHudState(initialHudState, {
+      phase: "inserted",
+      message: "已落字",
+      sessionId: 42,
+    });
+    const globalUndo = reduceHudState(success, {
+      phase: "undone",
+      message: "已撤销",
+      sessionId: null,
+    });
+
+    expect(globalUndo.kind).toBe("success");
+    expect(globalUndo.title).toBe("已撤销");
+    expect(globalUndo.sessionId).toBeNull();
   });
 
   it("distinguishes clipboard and permission outcomes", () => {

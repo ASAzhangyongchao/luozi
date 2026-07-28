@@ -224,7 +224,7 @@ code {
 /* —— M6 workbench —— */
 .app-shell {
   display: grid;
-  grid-template-columns: 72px minmax(0, 1fr);
+  grid-template-columns: 64px minmax(0, 1fr);
   height: 100vh;
   overflow: hidden;
 }
@@ -232,12 +232,12 @@ code {
 .app-rail {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   height: 100%;
   min-height: 0;
-  padding: 12px 8px;
+  padding: 10px 6px;
   border-right: 1px solid var(--line);
-  background: var(--surface-raised);
+  background: color-mix(in srgb, var(--surface-raised) 70%, var(--ice-white));
   overflow: hidden;
 }
 
@@ -257,16 +257,16 @@ code {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   width: 100%;
   margin: 0;
-  padding: 10px 4px;
+  padding: 8px 2px;
   border: 0;
   border-radius: 10px;
   background: transparent;
   color: var(--content-muted);
   cursor: pointer;
-  font-size: 11px;
+  font-size: 10px;
   line-height: 1.2;
 }
 
@@ -321,9 +321,9 @@ code {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 16px;
+  padding: 10px 14px;
   border-bottom: 1px solid var(--line);
-  background: var(--control-glass);
+  background: color-mix(in srgb, #ffffff 55%, transparent);
   backdrop-filter: blur(14px) saturate(1.15);
   -webkit-backdrop-filter: blur(14px) saturate(1.15);
   flex-shrink: 0;
@@ -373,14 +373,14 @@ code {
   width: 100%;
   box-sizing: border-box;
   resize: none;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 16px 18px;
+  border: 1px solid color-mix(in srgb, var(--night-teal) 8%, transparent);
+  border-radius: 12px;
+  padding: 14px 16px;
   background: #fff;
   color: var(--night-teal);
   font: inherit;
   line-height: 1.65;
-  font-size: 1.02rem;
+  font-size: 1rem;
 }
 
 #editor:focus {
@@ -482,11 +482,11 @@ code {
   align-items: center;
   justify-content: center;
   text-align: center;
-  gap: 8px;
-  padding: 48px 24px;
-  border: 1px dashed var(--line);
-  border-radius: 14px;
-  background: color-mix(in srgb, #ffffff 70%, var(--ice-white));
+  gap: 6px;
+  padding: 40px 20px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
   color: var(--content-muted);
 }
 
@@ -494,12 +494,12 @@ code {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 56px;
-  height: 56px;
-  border-radius: 16px;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
   color: var(--night-teal);
-  background: color-mix(in srgb, var(--aurora-cyan) 16%, transparent);
-  margin-bottom: 4px;
+  background: color-mix(in srgb, var(--aurora-cyan) 12%, transparent);
+  margin-bottom: 2px;
 }
 
 .history-empty-title {
@@ -517,16 +517,16 @@ code {
 }
 
 .settings-dialog {
-  width: min(820px, calc(100vw - 48px));
-  height: min(620px, calc(100vh - 48px));
+  width: min(760px, calc(100vw - 56px));
+  height: min(560px, calc(100vh - 56px));
   max-width: none;
   max-height: none;
   padding: 0;
   border: 1px solid var(--line);
-  border-radius: 16px;
+  border-radius: 14px;
   background: var(--content-bg);
   color: var(--content-ink);
-  box-shadow: 0 24px 64px color-mix(in srgb, var(--night-teal) 22%, transparent);
+  box-shadow: 0 18px 48px color-mix(in srgb, var(--night-teal) 18%, transparent);
   overflow: hidden;
 }
 

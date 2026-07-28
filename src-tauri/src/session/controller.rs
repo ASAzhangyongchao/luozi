@@ -10,7 +10,7 @@ use luozi_core::{
     SessionMachine, SessionPhase, TargetValidation,
 };
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, State};
 
 use crate::spike::{self, TargetToken, ValidationState};
 
@@ -520,6 +520,24 @@ pub fn capture_source_token(app: &AppHandle) -> TargetToken {
     }
 }
 
+fn place_overlay_bottom_center(window: &tauri::WebviewWindow, interactive: bool) {
+    // Compact Typeless-like pill; interactive needs room for cancel / wave / confirm.
+    let width = if interactive { 268.0 } else { 188.0 };
+    let height = 52.0;
+    let bottom_gap = 64.0;
+    let _ = window.set_size(LogicalSize::new(width, height));
+    let Ok(Some(monitor)) = window.current_monitor() else {
+        return;
+    };
+    let scale = monitor.scale_factor();
+    let screen = monitor.size();
+    let screen_w = screen.width as f64 / scale;
+    let screen_h = screen.height as f64 / scale;
+    let x = ((screen_w - width) / 2.0).max(0.0);
+    let y = (screen_h - height - bottom_gap).max(0.0);
+    let _ = window.set_position(LogicalPosition::new(x, y));
+}
+
 fn show_overlay(app: &AppHandle, visible: bool) {
     show_overlay_ex(app, visible, false);
 }
@@ -539,6 +557,7 @@ fn show_overlay_ex(app: &AppHandle, visible: bool, interactive: bool) {
                     let _ = window.set_ignore_cursor_events(!interactive);
                     let _ = window.set_background_color(Some(tauri::window::Color(0, 0, 0, 0)));
                     if visible {
+                        place_overlay_bottom_center(&window, interactive);
                         let _ = window.show();
                     } else {
                         let _ = window.hide();

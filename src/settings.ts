@@ -187,6 +187,11 @@ async function main() {
 
   const params = new URLSearchParams(location.search);
   let initial = params.get("section") || "general";
+  const embedded =
+    params.get("embed") === "1" || (typeof window !== "undefined" && window.self !== window.top);
+  if (embedded) {
+    document.body.classList.add("settings-embed");
+  }
   try {
     const pending = await invoke<string | null>("settings_take_nav");
     if (pending) initial = pending;
@@ -197,11 +202,13 @@ async function main() {
 
   await refresh();
 
-  const win = getCurrentWindow();
-  await win.onCloseRequested(async (event) => {
-    event.preventDefault();
-    await win.hide();
-  });
+  if (!embedded) {
+    const win = getCurrentWindow();
+    await win.onCloseRequested(async (event) => {
+      event.preventDefault();
+      await win.hide();
+    });
+  }
 }
 
 main().catch((err) => {

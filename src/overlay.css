@@ -1,17 +1,13 @@
+@import "./design-tokens.css";
+
 :root {
-  --night-teal: #0b3034;
-  --aurora-cyan: #42d9d3;
-  --ice-white: #f4fbfa;
-  --amber: #e8a54b;
-  --risk-red: #e85d5d;
-  --electric-blue: #6c8eff;
-  color: var(--night-teal);
-  font-family:
-    "PingFang SC",
-    "Hiragino Sans GB",
-    "Segoe UI",
-    system-ui,
-    sans-serif;
+  --night-teal: var(--text-ink);
+  --aurora-cyan: var(--brand-mint);
+  --ice-white: var(--surface-pearl);
+  --amber: var(--state-warning);
+  --risk-red: var(--state-error);
+  --electric-blue: var(--brand-violet);
+  color: var(--text-ink);
 }
 
 html,

@@ -1,27 +1,17 @@
-:root {
-  /* Force light plate so dark-mode OS chrome does not bleed into rounded corners. */
-  color-scheme: light;
-  --night-teal: #0b3034;
-  --aurora-cyan: #42d9d3;
-  --ice-white: #f4fbfa;
-  --amber: #e8a54b;
-  --risk-red: #e85d5d;
+@import "./design-tokens.css";
 
-  --bg: #f4fbfa;
-  --panel: #f7fcfb;
-  --line: color-mix(in srgb, var(--night-teal) 12%, transparent);
-  --text: var(--night-teal);
-  --muted: color-mix(in srgb, var(--night-teal) 58%, transparent);
-  --accent: var(--aurora-cyan);
-  --ok: #1a7f4b;
-  --radius: 12px;
-  font-family:
-    "PingFang SC",
-    "Hiragino Sans GB",
-    "Microsoft YaHei UI",
-    "Segoe UI",
-    system-ui,
-    sans-serif;
+:root {
+  --night-teal: var(--text-ink);
+  --aurora-cyan: var(--brand-mint);
+  --amber: var(--state-warning);
+  --bg: var(--surface-mist);
+  --panel: var(--surface-pearl);
+  --line: var(--line-soft);
+  --text: var(--text-ink);
+  --muted: var(--text-muted);
+  --accent: var(--brand-mint);
+  --ok: var(--state-success);
+  --radius: var(--radius-panel);
   line-height: 1.55;
 }
 
@@ -36,7 +26,7 @@ body.settings-body {
   background-color: var(--bg);
   background-image: radial-gradient(
     900px 420px at 8% -20%,
-    color-mix(in srgb, var(--aurora-cyan) 14%, transparent),
+    color-mix(in srgb, var(--accent) 14%, transparent),
     transparent 55%
   );
   background-repeat: no-repeat;
@@ -92,7 +82,7 @@ body.settings-body {
   margin: 0 0 18px;
   font-size: 22px;
   font-weight: 650;
-  color: var(--night-teal);
+  color: var(--text);
 }
 
 .settings-section h2 {
@@ -129,8 +119,8 @@ body.settings-body {
 
 button {
   appearance: none;
-  border: 1px solid color-mix(in srgb, var(--night-teal) 14%, transparent);
-  background: #ffffff;
+  border: 1px solid color-mix(in srgb, var(--text) 14%, transparent);
+  background: var(--surface-solid);
   color: var(--text);
   border-radius: 8px;
   padding: 7px 12px;
@@ -186,7 +176,7 @@ button:disabled {
 }
 
 .badge.warn {
-  color: color-mix(in srgb, var(--amber) 80%, var(--night-teal));
+  color: color-mix(in srgb, var(--amber) 80%, var(--text));
   border-color: color-mix(in srgb, var(--amber) 45%, var(--line));
 }
 
@@ -233,7 +223,7 @@ ul.plain {
   padding: 0;
   border-radius: 999px;
   border: 1px solid var(--line);
-  background: #fff;
+  background: var(--surface-solid);
   color: var(--muted);
   font-size: 11px;
   font-weight: 650;
@@ -253,7 +243,7 @@ ul.plain {
   padding: 12px 14px;
   border-radius: 10px;
   border: 1px solid var(--line);
-  background: #fff;
+  background: var(--surface-solid);
   color: var(--text);
   font-size: 13px;
   line-height: 1.45;
@@ -271,7 +261,7 @@ ul.plain {
 }
 
 .pick-dialog::backdrop {
-  background: color-mix(in srgb, #0b3034 35%, transparent);
+  background: color-mix(in srgb, var(--text-ink) 35%, transparent);
 }
 
 .pick-dialog form {
@@ -304,7 +294,7 @@ ul.plain {
 
 .pick-option.selected {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
-  background: color-mix(in srgb, var(--accent) 12%, #fff);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-solid));
 }
 
 .pick-option strong {

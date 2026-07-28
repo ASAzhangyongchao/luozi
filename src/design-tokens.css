@@ -1,0 +1,52 @@
+:root {
+  color-scheme: light dark;
+  --surface-pearl: #fbfdf9;
+  --surface-mist: #eef7f5;
+  --surface-solid: #ffffff;
+  --text-ink: #173a3a;
+  --text-muted: #688181;
+  --line-soft: color-mix(in srgb, var(--text-ink) 12%, transparent);
+  --brand-mint: #62d5c7;
+  --brand-violet: #8b92ff;
+  --state-success: #50c59f;
+  --state-error: #f1786d;
+  --state-warning: #d99b4d;
+  --shadow-float: 0 12px 36px color-mix(in srgb, #163434 16%, transparent);
+  --radius-control: 8px;
+  --radius-panel: 14px;
+  --radius-hud: 999px;
+  --space-1: 8px;
+  --space-2: 16px;
+  --space-3: 24px;
+  --motion-fast: 160ms;
+  --motion-state: 600ms;
+  font-family:
+    "PingFang SC", -apple-system, BlinkMacSystemFont, "SF Pro Text",
+    "Segoe UI", system-ui, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface-pearl: #182323;
+    --surface-mist: #202e2e;
+    --surface-solid: #253333;
+    --text-ink: #eef8f5;
+    --text-muted: #9db2b0;
+    --line-soft: color-mix(in srgb, #eef8f5 14%, transparent);
+    --shadow-float: 0 16px 42px color-mix(in srgb, #000 42%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 0ms;
+    --motion-state: 0ms;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --surface-pearl: var(--surface-solid);
+    --shadow-float: 0 4px 12px #173a3a;
+  }
+}

@@ -30,6 +30,37 @@ pub enum SessionIntent {
     VoiceEdit,
 }
 
+#[derive(Default)]
+struct SessionIntentSlot {
+    owned: Option<(u64, SessionIntent)>,
+}
+
+impl SessionIntentSlot {
+    fn bind(&mut self, session_id: u64, intent: SessionIntent) {
+        self.owned = Some((session_id, intent));
+    }
+
+    fn get(&self, session_id: u64) -> Option<SessionIntent> {
+        self.owned
+            .filter(|(owner_session_id, _)| *owner_session_id == session_id)
+            .map(|(_, intent)| intent)
+    }
+
+    fn consume(&mut self, session_id: u64) -> Option<SessionIntent> {
+        if self
+            .owned
+            .is_none_or(|(owner_session_id, _)| owner_session_id != session_id)
+        {
+            return None;
+        }
+        self.owned.take().map(|(_, intent)| intent)
+    }
+
+    fn clear(&mut self, session_id: u64) -> bool {
+        self.consume(session_id).is_some()
+    }
+}
+
 struct OwnedSessionResource<T> {
     resource: T,
     owner_session_id: Option<u64>,
@@ -190,6 +221,7 @@ fn cleanup_session_resources_locked(
     if let Ok(mut recorder) = state.recorder.lock() {
         recorder.cleanup_if_owned(session_id, SessionRecorder::cancel);
     }
+    clear_session_intent(state, session_id);
     let _ = state.source_target.lock().map(|mut target| *target = None);
     let _ = state.source_pid.lock().map(|mut pid| *pid = None);
 }
@@ -214,6 +246,21 @@ fn recording_session_is_current(state: &AppSessionState, session_id: u64) -> boo
         .ok()
         .and_then(|machine| machine.recording_session_id())
         == Some(session_id)
+}
+
+fn session_intent_for(state: &AppSessionState, session_id: u64) -> Option<SessionIntent> {
+    state.intent.lock().ok()?.get(session_id)
+}
+
+fn consume_session_intent(state: &AppSessionState, session_id: u64) -> Option<SessionIntent> {
+    state.intent.lock().ok()?.consume(session_id)
+}
+
+fn clear_session_intent(state: &AppSessionState, session_id: u64) -> bool {
+    state
+        .intent
+        .lock()
+        .is_ok_and(|mut intent| intent.clear(session_id))
 }
 
 fn cancel_session_if_current(state: &AppSessionState, session_id: u64) -> bool {
@@ -368,7 +415,7 @@ pub struct AppSessionState {
     /// Model download in flight (tray debounce).
     pub model_fetching: AtomicBool,
     /// Continue dictation vs voice-edit instruction (M7).
-    pub intent: Mutex<SessionIntent>,
+    intent: Mutex<SessionIntentSlot>,
     energy_session: EnergySessionGate,
     hud_lifecycle: HudLifecycle,
     #[allow(dead_code)]
@@ -390,7 +437,7 @@ impl Default for AppSessionState {
             menu_session_id: Mutex::new(None),
             source_pid: Mutex::new(None),
             model_fetching: AtomicBool::new(false),
-            intent: Mutex::new(SessionIntent::Continue),
+            intent: Mutex::new(SessionIntentSlot::default()),
             energy_session: EnergySessionGate::default(),
             hud_lifecycle: HudLifecycle::default(),
             config: super::config_store::load(),
@@ -411,12 +458,12 @@ fn claim_session_with_intent_locked(
     start_intent: SessionIntent,
 ) -> Result<SessionEffect, String> {
     let effect = machine.handle(SessionCommand::Start);
-    if matches!(effect, SessionEffect::BeganRecording { .. }) {
+    if let SessionEffect::BeganRecording { session_id } = &effect {
         let Ok(mut intent) = state.intent.lock() else {
             let _ = machine.handle(SessionCommand::Cancel);
             return Err("intent_lock_failed".into());
         };
-        *intent = start_intent;
+        intent.bind(*session_id, start_intent);
     }
     Ok(effect)
 }
@@ -443,6 +490,7 @@ fn decide_menu_toggle(state: &AppSessionState, start_intent: SessionIntent) -> M
             };
             let Ok(mut menu_session_id) = state.menu_session_id.lock() else {
                 let _ = machine.handle(SessionCommand::Cancel);
+                clear_session_intent(state, session_id);
                 return MenuToggleDecision::RejectedBusy;
             };
             *menu_session_id = Some(session_id);
@@ -742,16 +790,11 @@ fn finish_transcribe_async(
             }
         };
 
-        let intent = state
-            .intent
-            .lock()
-            .ok()
-            .map(|g| *g)
-            .unwrap_or(SessionIntent::Continue);
-        let _ = state
-            .intent
-            .lock()
-            .map(|mut g| *g = SessionIntent::Continue);
+        let Some(intent) = consume_session_intent(&state, session_id) else {
+            eprintln!("luozi: transcript intent stale for session {session_id}");
+            hide_overlay_if_idle(&app, &state);
+            return;
+        };
 
         if intent == SessionIntent::VoiceEdit {
             // Consume session machine so we leave busy state, then apply text AI to draft.
@@ -1480,18 +1523,7 @@ fn fail_transcribe(
     session_id: u64,
     err: String,
 ) -> Result<SessionStatus, String> {
-    let canceled = state
-        .machine
-        .lock()
-        .ok()
-        .map(|mut machine| {
-            if machine.active_session_id() != Some(session_id) {
-                return false;
-            }
-            machine.handle(SessionCommand::Cancel);
-            true
-        })
-        .unwrap_or(false);
+    let canceled = cancel_session_if_current(state, session_id);
     if !canceled {
         eprintln!("luozi: transcribe failure stale for session {session_id}: {err}");
         return Err(err);
@@ -1922,12 +1954,11 @@ fn start_session_with_token_claim(
                 return status_from(state, "canceled_before_target_commit".into());
             }
             arm_escape(app);
-            let editing = state
-                .intent
-                .lock()
-                .ok()
-                .map(|g| *g == SessionIntent::VoiceEdit)
-                .unwrap_or(false);
+            let Some(intent) = session_intent_for(state, session_id) else {
+                let _ = cancel_session_if_current(state, session_id);
+                return status_from(state, "canceled_before_intent_read".into());
+            };
+            let editing = intent == SessionIntent::VoiceEdit;
             if !emit_recording_phase_if_current(app, state, session_id, editing) {
                 return status_from(state, "canceled_before_recording_phase".into());
             }
@@ -2315,9 +2346,10 @@ mod hud_tests {
 mod session_resource_tests {
     use super::{
         cancel_session_if_current, claim_session_with_intent, cleanup_stale_recorder_after_start,
-        commit_capture_if_current, decide_menu_toggle, dummy_token,
-        with_recording_session_if_current, AppSessionState, MenuToggleDecision,
-        OwnedSessionResource, SessionCommand, SessionEffect, SessionIntent,
+        clear_session_intent, commit_capture_if_current, consume_session_intent,
+        decide_menu_toggle, dummy_token, session_intent_for, with_recording_session_if_current,
+        AppSessionState, MenuToggleDecision, OwnedSessionResource, SessionCommand, SessionEffect,
+        SessionIntent,
     };
     use std::sync::atomic::Ordering;
 
@@ -2540,17 +2572,18 @@ mod session_resource_tests {
     fn busy_continue_does_not_overwrite_active_voice_edit_intent() {
         let state = AppSessionState::default();
 
-        assert!(matches!(
-            claim_session_with_intent(&state, SessionIntent::VoiceEdit).expect("voice-edit claim"),
-            SessionEffect::BeganRecording { .. }
-        ));
+        let session_id =
+            match claim_session_with_intent(&state, SessionIntent::VoiceEdit).expect("claim") {
+                SessionEffect::BeganRecording { session_id } => session_id,
+                other => panic!("expected recording, got {other:?}"),
+            };
         assert_eq!(
             claim_session_with_intent(&state, SessionIntent::Continue).expect("busy claim"),
             SessionEffect::RejectedBusy
         );
         assert_eq!(
-            *state.intent.lock().expect("intent lock"),
-            SessionIntent::VoiceEdit
+            session_intent_for(&state, session_id),
+            Some(SessionIntent::VoiceEdit)
         );
     }
 
@@ -2558,17 +2591,79 @@ mod session_resource_tests {
     fn busy_voice_edit_does_not_overwrite_active_continue_intent() {
         let state = AppSessionState::default();
 
-        assert!(matches!(
-            claim_session_with_intent(&state, SessionIntent::Continue).expect("continue claim"),
-            SessionEffect::BeganRecording { .. }
-        ));
+        let session_id =
+            match claim_session_with_intent(&state, SessionIntent::Continue).expect("claim") {
+                SessionEffect::BeganRecording { session_id } => session_id,
+                other => panic!("expected recording, got {other:?}"),
+            };
         assert_eq!(
             claim_session_with_intent(&state, SessionIntent::VoiceEdit).expect("busy claim"),
             SessionEffect::RejectedBusy
         );
         assert_eq!(
-            *state.intent.lock().expect("intent lock"),
-            SessionIntent::Continue
+            session_intent_for(&state, session_id),
+            Some(SessionIntent::Continue)
+        );
+    }
+
+    #[test]
+    fn canceled_session_late_consume_cannot_take_new_session_intent() {
+        let state = AppSessionState::default();
+        let old_session_id =
+            match claim_session_with_intent(&state, SessionIntent::VoiceEdit).expect("old claim") {
+                SessionEffect::BeganRecording { session_id } => session_id,
+                other => panic!("expected recording, got {other:?}"),
+            };
+        assert!(cancel_session_if_current(&state, old_session_id));
+        let new_session_id =
+            match claim_session_with_intent(&state, SessionIntent::Continue).expect("new claim") {
+                SessionEffect::BeganRecording { session_id } => session_id,
+                other => panic!("expected recording, got {other:?}"),
+            };
+
+        assert_eq!(consume_session_intent(&state, old_session_id), None);
+        assert_eq!(
+            session_intent_for(&state, new_session_id),
+            Some(SessionIntent::Continue)
+        );
+    }
+
+    #[test]
+    fn matching_session_consumes_intent_once() {
+        let state = AppSessionState::default();
+        let session_id =
+            match claim_session_with_intent(&state, SessionIntent::VoiceEdit).expect("claim") {
+                SessionEffect::BeganRecording { session_id } => session_id,
+                other => panic!("expected recording, got {other:?}"),
+            };
+
+        assert_eq!(
+            consume_session_intent(&state, session_id),
+            Some(SessionIntent::VoiceEdit)
+        );
+        assert_eq!(consume_session_intent(&state, session_id), None);
+    }
+
+    #[test]
+    fn cancel_clears_only_matching_session_intent() {
+        let state = AppSessionState::default();
+        let old_session_id =
+            match claim_session_with_intent(&state, SessionIntent::VoiceEdit).expect("old claim") {
+                SessionEffect::BeganRecording { session_id } => session_id,
+                other => panic!("expected recording, got {other:?}"),
+            };
+        assert!(cancel_session_if_current(&state, old_session_id));
+        assert_eq!(session_intent_for(&state, old_session_id), None);
+
+        let new_session_id =
+            match claim_session_with_intent(&state, SessionIntent::Continue).expect("new claim") {
+                SessionEffect::BeganRecording { session_id } => session_id,
+                other => panic!("expected recording, got {other:?}"),
+            };
+        assert!(!clear_session_intent(&state, old_session_id));
+        assert_eq!(
+            session_intent_for(&state, new_session_id),
+            Some(SessionIntent::Continue)
         );
     }
 }
@@ -2576,8 +2671,8 @@ mod session_resource_tests {
 #[cfg(test)]
 mod menu_toggle_tests {
     use super::{
-        decide_menu_toggle, prepare_cancel_state, recording_phase_copy, AppSessionState,
-        MenuToggleDecision, SessionCommand, SessionEffect, SessionIntent,
+        decide_menu_toggle, prepare_cancel_state, recording_phase_copy, session_intent_for,
+        AppSessionState, MenuToggleDecision, SessionCommand, SessionEffect, SessionIntent,
     };
     use std::sync::atomic::Ordering;
 
@@ -2707,8 +2802,8 @@ mod menu_toggle_tests {
             MenuToggleDecision::Start { session_id: 0 }
         );
         assert_eq!(
-            *state.intent.lock().expect("intent lock"),
-            SessionIntent::VoiceEdit
+            session_intent_for(&state, 0),
+            Some(SessionIntent::VoiceEdit)
         );
     }
 }

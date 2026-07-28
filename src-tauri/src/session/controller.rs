@@ -38,6 +38,19 @@ enum SessionInputSource {
     Shortcut(SessionIntent),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ShortcutStartPlan {
+    intent: SessionIntent,
+    source: SessionInputSource,
+}
+
+fn shortcut_start_plan(intent: SessionIntent) -> ShortcutStartPlan {
+    ShortcutStartPlan {
+        intent,
+        source: SessionInputSource::Shortcut(intent),
+    }
+}
+
 #[derive(Default)]
 struct SessionIntentSlot {
     owned: Option<(u64, SessionIntent, SessionInputSource)>,
@@ -1358,15 +1371,14 @@ pub fn start_voice_edit_session(
     app: &AppHandle,
     state: &AppSessionState,
 ) -> Result<SessionStatus, String> {
-    prepare_voice_edit(app)?;
-    start_session_for_intent(app, state, SessionIntent::VoiceEdit)
+    start_shortcut_session(app, state, SessionIntent::VoiceEdit)
 }
 
 pub fn start_continue_session(
     app: &AppHandle,
     state: &AppSessionState,
 ) -> Result<SessionStatus, String> {
-    start_session(app, state)
+    start_shortcut_session(app, state, SessionIntent::Continue)
 }
 
 fn run_menu_toggle(
@@ -1929,21 +1941,18 @@ pub fn start_session(app: &AppHandle, state: &AppSessionState) -> Result<Session
     start_session_with_token(app, state, dummy_token())
 }
 
-fn start_session_for_intent(
+pub fn start_shortcut_session(
     app: &AppHandle,
     state: &AppSessionState,
     intent: SessionIntent,
 ) -> Result<SessionStatus, String> {
+    if intent == SessionIntent::VoiceEdit {
+        prepare_voice_edit(app)?;
+    }
+    let plan = shortcut_start_plan(intent);
     // HARD RULE: never wait on Accessibility before opening the mic.
     // Capture runs in the background; deliver path falls back to clipboard+⌘V.
-    start_session_with_token_claim(
-        app,
-        state,
-        dummy_token(),
-        None,
-        intent,
-        SessionInputSource::Shortcut(intent),
-    )
+    start_session_with_token_claim(app, state, dummy_token(), None, plan.intent, plan.source)
 }
 
 pub fn start_session_with_token(
@@ -2818,8 +2827,8 @@ mod menu_toggle_tests {
     use super::{
         claim_shortcut_session_with_intent, decide_menu_toggle, note_hold_pressed,
         note_hold_released, prepare_cancel_state, recording_phase_copy, session_input_is_active,
-        session_intent_for, AppSessionState, MenuToggleDecision, SessionCommand, SessionEffect,
-        SessionIntent,
+        session_intent_for, shortcut_start_plan, AppSessionState, MenuToggleDecision,
+        SessionCommand, SessionEffect, SessionInputSource, SessionIntent,
     };
     use std::sync::atomic::Ordering;
 
@@ -3043,12 +3052,16 @@ mod menu_toggle_tests {
     }
 
     #[test]
-    fn release_before_shortcut_claim_is_remembered_for_microphone_open() {
+    fn release_before_shortcut_claim_is_not_masked_by_another_shortcut_hold() {
         let state = AppSessionState::default();
+        note_hold_pressed(&state, SessionIntent::VoiceEdit);
         note_hold_pressed(&state, SessionIntent::Continue);
 
         assert_eq!(note_hold_released(&state, SessionIntent::Continue), None);
-        assert!(!state.hold_active.load(Ordering::SeqCst));
+        assert!(
+            state.hold_active.load(Ordering::SeqCst),
+            "voice edit remains held"
+        );
 
         let session_id = match claim_shortcut_session_with_intent(&state, SessionIntent::Continue)
             .expect("claim")
@@ -3057,6 +3070,16 @@ mod menu_toggle_tests {
             other => panic!("expected recording, got {other:?}"),
         };
         assert!(!session_input_is_active(&state, session_id));
+        assert_eq!(note_hold_released(&state, SessionIntent::VoiceEdit), None);
+        assert!(!state.hold_active.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn continue_production_start_plan_uses_continue_shortcut_ownership() {
+        assert_eq!(
+            shortcut_start_plan(SessionIntent::Continue).source,
+            SessionInputSource::Shortcut(SessionIntent::Continue)
+        );
     }
 }
 

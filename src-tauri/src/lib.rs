@@ -211,46 +211,62 @@ where
     }
 }
 
+#[derive(Default)]
+struct RegisteredShortcuts {
+    continue_speaking: Option<String>,
+    voice_edit: Option<String>,
+    cancel: Option<String>,
+}
+
+fn menu_action_label(action: &str, shortcut: Option<&str>) -> String {
+    match shortcut {
+        Some(shortcut) => format!("{action} · {shortcut}"),
+        None => action.to_string(),
+    }
+}
+
 /// Tray IA follows design §6.3. M2 enables start / cancel / undo.
-fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
+fn build_tray(
+    app: &tauri::AppHandle,
+    registered_shortcuts: &RegisteredShortcuts,
+) -> tauri::Result<()> {
     let cfg = session::config_store::load();
 
-    let model_ready = session::asr::default_model_path().is_file();
+    let model_readiness = session::model_store::model_readiness();
     let cloud_ok = session::cloud::cloud_ready(&cfg.cloud_asr);
     let ax_ok = session::controller::accessibility_trusted_for_tray();
-    let model_label = session::model_store::model_status();
     let cloud_label = if cloud_ok {
-        "Groq 就绪"
+        "云端已就绪"
     } else {
-        "Groq 未配置"
+        "云端未配置"
     };
-    let status_label = match ax_ok {
-        true => format!("{model_label} · {cloud_label} · 辅助功能 OK"),
-        false => format!("{model_label} · {cloud_label} · 辅助功能未生效"),
+    let accessibility_label = if ax_ok {
+        "辅助功能已开启"
+    } else {
+        "辅助功能未开启"
     };
+    let status_label = format!(
+        "{} · {cloud_label} · {accessibility_label}",
+        model_readiness.status_label()
+    );
     let title = MenuItem::with_id(app, "title", "Luozi 已就绪", false, None::<&str>)?;
     let status = MenuItem::with_id(app, "status", status_label, false, None::<&str>)?;
     let sep_status = PredefinedMenuItem::separator(app)?;
 
-    let start = MenuItem::with_id(
-        app,
-        "start",
+    let start_label = menu_action_label(
         "开始语音输入",
-        true,
-        Some(cfg.continue_speaking_shortcut.as_str()),
-    )?;
-    let cancel = MenuItem::with_id(app, "cancel", "取消当前会话", true, Some("Escape"))?;
+        registered_shortcuts.continue_speaking.as_deref(),
+    );
+    let start = MenuItem::with_id(app, "start", &start_label, true, None::<&str>)?;
+    let cancel_label = menu_action_label("取消当前会话", registered_shortcuts.cancel.as_deref());
+    let cancel = MenuItem::with_id(app, "cancel", &cancel_label, true, None::<&str>)?;
     let undo = MenuItem::with_id(app, "undo", "撤销上次落字", true, None::<&str>)?;
     let sep_actions = PredefinedMenuItem::separator(app)?;
 
     let draft = MenuItem::with_id(app, "draft", "打开语音草稿…", true, None::<&str>)?;
-    let voice_edit = MenuItem::with_id(
-        app,
-        "voice_edit",
-        "修改当前草稿",
-        true,
-        Some(cfg.voice_edit_shortcut.as_str()),
-    )?;
+    let voice_edit_label =
+        menu_action_label("修改当前草稿", registered_shortcuts.voice_edit.as_deref());
+    let voice_edit = MenuItem::with_id(app, "voice_edit", &voice_edit_label, true, None::<&str>)?;
     let sep_prefs = PredefinedMenuItem::separator(app)?;
 
     let engine = MenuItem::with_id(
@@ -264,7 +280,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         app,
         "fetch_model",
         "下载本地模型…",
-        !model_ready,
+        !model_readiness.is_ready(),
         None::<&str>,
     )?;
 
@@ -354,7 +370,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
 
 /// Register continue-speaking + voice-edit hold hotkeys.
 /// Escape is always-on via Builder::with_handler.
-fn register_session_shortcuts(app: &tauri::AppHandle) -> Result<String, String> {
+fn register_session_shortcuts(app: &tauri::AppHandle) -> RegisteredShortcuts {
     let cfg = session::config_store::load();
     let primary = cfg.continue_speaking_shortcut.clone();
     let voice_edit = cfg.voice_edit_shortcut.clone();
@@ -367,7 +383,7 @@ fn register_session_shortcuts(app: &tauri::AppHandle) -> Result<String, String> 
 
     let _ = app.global_shortcut().unregister_all();
 
-    let mut continue_registered: Option<String> = None;
+    let mut registered = RegisteredShortcuts::default();
     for raw in candidates {
         let sc: Shortcut = match raw.parse() {
             Ok(s) => s,
@@ -418,7 +434,7 @@ fn register_session_shortcuts(app: &tauri::AppHandle) -> Result<String, String> 
         }) {
             Ok(()) => {
                 eprintln!("luozi: continue-speaking shortcut registered: {raw}");
-                continue_registered = Some(raw.to_string());
+                registered.continue_speaking = Some(raw.to_string());
                 if let Some(state) = app.try_state::<AppSessionState>() {
                     if let Ok(mut slot) = state.registered_continue.lock() {
                         *slot = Some(raw.to_string());
@@ -433,7 +449,7 @@ fn register_session_shortcuts(app: &tauri::AppHandle) -> Result<String, String> 
     // Voice-edit second hotkey (M7).
     let voice_candidates = [voice_edit.as_str(), "Control+Alt+M", "Control+Alt+Shift+M"];
     for raw in voice_candidates {
-        if continue_registered.as_deref() == Some(raw) {
+        if registered.continue_speaking.as_deref() == Some(raw) {
             continue;
         }
         let sc: Shortcut = match raw.parse() {
@@ -486,6 +502,7 @@ fn register_session_shortcuts(app: &tauri::AppHandle) -> Result<String, String> 
             }) {
             Ok(()) => {
                 eprintln!("luozi: voice-edit shortcut registered: {raw}");
+                registered.voice_edit = Some(raw.to_string());
                 break;
             }
             Err(e) => eprintln!("luozi: voice-edit on_shortcut({raw}) failed: {e}"),
@@ -494,14 +511,15 @@ fn register_session_shortcuts(app: &tauri::AppHandle) -> Result<String, String> 
 
     if let Ok(esc) = "Escape".parse::<Shortcut>() {
         match app.global_shortcut().register(esc) {
-            Ok(()) => eprintln!("luozi: Escape armed (always-on cancel)"),
+            Ok(()) => {
+                eprintln!("luozi: Escape armed (always-on cancel)");
+                registered.cancel = Some("Escape".into());
+            }
             Err(e) => eprintln!("luozi: Escape register failed: {e}"),
         }
     }
 
-    continue_registered.ok_or_else(|| {
-        "Unable to register continue-speaking hotkey; use tray 「开始语音输入」".into()
-    })
+    registered
 }
 
 fn shortcut_escape_handler(
@@ -556,11 +574,14 @@ pub fn run() {
                 let _ = overlay.set_ignore_cursor_events(true);
                 let _ = overlay.hide();
             }
-            build_tray(app.handle())?;
-            match register_session_shortcuts(app.handle()) {
-                Ok(name) => eprintln!("luozi: hotkey ready → {name}"),
-                Err(err) => eprintln!("luozi: shortcut registration failed: {err}"),
+            let registered_shortcuts = register_session_shortcuts(app.handle());
+            match registered_shortcuts.continue_speaking.as_deref() {
+                Some(name) => eprintln!("luozi: hotkey ready → {name}"),
+                None => {
+                    eprintln!("luozi: shortcut registration failed; tray start remains available")
+                }
             }
+            build_tray(app.handle(), &registered_shortcuts)?;
             // First-run mic TCC should not happen mid hold-to-talk.
             session::controller::warmup_microphone_async();
 

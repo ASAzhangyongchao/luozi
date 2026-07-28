@@ -35,6 +35,27 @@ pub struct ModelEntry {
     pub recommended: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelReadiness {
+    Missing,
+    Ready,
+    Corrupt,
+}
+
+impl ModelReadiness {
+    pub fn is_ready(self) -> bool {
+        self == Self::Ready
+    }
+
+    pub fn status_label(self) -> &'static str {
+        match self {
+            Self::Missing => "本地模型未安装",
+            Self::Ready => "本地模型已就绪",
+            Self::Corrupt => "本地模型需重新下载",
+        }
+    }
+}
+
 pub fn load_manifest() -> Result<ModelManifest, String> {
     serde_json::from_str(MANIFEST_JSON).map_err(|e| format!("model_manifest_invalid: {e}"))
 }
@@ -111,16 +132,19 @@ pub fn verify_entry(path: &Path, entry: &ModelEntry) -> Result<(), String> {
     Ok(())
 }
 
-pub fn model_status() -> String {
-    let Ok(entry) = recommended_model() else {
-        return "模型清单无效".into();
-    };
-    let path = path_for_entry(&entry);
-    match verify_entry(&path, &entry) {
-        Ok(()) => format!("模型就绪 · {}", entry.display_name),
-        Err(err) if err.starts_with("model_missing") => "模型未安装 · 托盘可下载".into(),
-        Err(_) => "模型校验失败 · 请重新下载".into(),
+fn readiness_for(path: &Path, entry: &ModelEntry) -> ModelReadiness {
+    match verify_entry(path, entry) {
+        Ok(()) => ModelReadiness::Ready,
+        Err(err) if err.starts_with("model_missing") => ModelReadiness::Missing,
+        Err(_) => ModelReadiness::Corrupt,
     }
+}
+
+pub fn model_readiness() -> ModelReadiness {
+    let Ok(entry) = recommended_model() else {
+        return ModelReadiness::Corrupt;
+    };
+    readiness_for(&path_for_entry(&entry), &entry)
 }
 
 fn disk_free_bytes(dir: &Path) -> Option<u64> {
@@ -253,6 +277,32 @@ where
 mod tests {
     use super::*;
     use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_TEST_DIR: AtomicU64 = AtomicU64::new(0);
+
+    fn test_dir(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "luozi-model-{name}-{}-{}",
+            std::process::id(),
+            NEXT_TEST_DIR.fetch_add(1, Ordering::Relaxed)
+        ))
+    }
+
+    fn tiny_entry(file_name: &str, contents: &[u8]) -> ModelEntry {
+        let mut hasher = Sha256::new();
+        hasher.update(contents);
+        ModelEntry {
+            id: "test".into(),
+            display_name: "test".into(),
+            file_name: file_name.into(),
+            bytes: contents.len() as u64,
+            sha256: format!("{:x}", hasher.finalize()),
+            url: "http://example.invalid".into(),
+            license: String::new(),
+            recommended: true,
+        }
+    }
 
     #[test]
     fn manifest_parses_and_has_recommended() {
@@ -286,5 +336,35 @@ mod tests {
         let err = verify_entry(&path, &entry).unwrap_err();
         assert!(err.contains("model_checksum_failed"), "{err}");
         let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn readiness_distinguishes_missing_valid_and_corrupt_files() {
+        let dir = test_dir("readiness");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("tiny.bin");
+        let entry = tiny_entry("tiny.bin", b"hello-luozi");
+
+        assert_eq!(
+            readiness_for(&path, &entry),
+            ModelReadiness::Missing,
+            "a missing model stays recoverable"
+        );
+
+        fs::write(&path, b"hello-luozi").unwrap();
+        assert_eq!(
+            readiness_for(&path, &entry),
+            ModelReadiness::Ready,
+            "a verified model is ready"
+        );
+
+        fs::write(&path, b"HELLO-LUOZI").unwrap();
+        assert_eq!(
+            readiness_for(&path, &entry),
+            ModelReadiness::Corrupt,
+            "a present but invalid model must remain downloadable"
+        );
+
+        fs::remove_dir_all(&dir).unwrap();
     }
 }

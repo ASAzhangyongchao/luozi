@@ -69,6 +69,7 @@ pub struct SettingsSnapshot {
 
 pub fn snapshot(app: &AppHandle) -> SettingsSnapshot {
     let cfg = super::config_store::load();
+    let model_readiness = model_store::model_readiness();
     let registered = app
         .try_state::<controller::AppSessionState>()
         .and_then(|s| s.registered_continue.lock().ok().and_then(|g| g.clone()));
@@ -83,8 +84,8 @@ pub fn snapshot(app: &AppHandle) -> SettingsSnapshot {
         version: env!("CARGO_PKG_VERSION").to_string(),
         asr_mode_label: cfg.asr_mode.label_zh().to_string(),
         asr_mode: cfg.asr_mode.as_str().to_string(),
-        model_status: model_store::model_status(),
-        model_ready: super::asr::default_model_path().is_file(),
+        model_status: model_readiness.status_label().to_string(),
+        model_ready: model_readiness.is_ready(),
         cloud_asr_ready: cloud::cloud_ready(&cfg.cloud_asr),
         cloud_asr_host: cfg.cloud_asr.host().unwrap_or_default(),
         cloud_asr_provider: cfg.cloud_asr.provider_id.clone(),

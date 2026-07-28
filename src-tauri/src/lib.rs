@@ -141,6 +141,11 @@ fn open_settings_window(app: tauri::AppHandle, section: Option<String>) {
 }
 
 #[tauri::command]
+fn open_guide_window(app: tauri::AppHandle) {
+    show_guide(&app);
+}
+
+#[tauri::command]
 fn settings_take_nav() -> Option<String> {
     session::settings_api::take_pending_section()
 }
@@ -331,16 +336,16 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             "quit" => app.exit(0),
             _ => {}
         })
-        .on_tray_icon_event(|_tray, event| {
-            // Formal product path is hotkey + menu. Left-click must NOT open the
-            // unfinished practice window (that confused formal testing).
+        .on_tray_icon_event(|tray, event| {
+            // Left-click opens the draft workbench (main product surface).
+            // Right-click still shows the menu for Settings / How-to / etc.
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
                 ..
             } = event
             {
-                eprintln!("luozi: tray left-click ignored (use menu / hotkey)");
+                show_draft(tray.app_handle());
             }
         });
 
@@ -722,6 +727,7 @@ pub fn run() {
             settings_open_releases,
             settings_open_spike,
             open_settings_window,
+            open_guide_window,
             settings_take_nav,
             run_focus_abc_probe,
             run_delivery_matrix_probe,
@@ -731,8 +737,14 @@ pub fn run() {
             validate_target,
             deliver_probe
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // Dock / app icon click while already running → show draft (same as tray left-click).
+            if let tauri::RunEvent::Reopen { .. } = event {
+                show_draft(app_handle);
+            }
+        });
 }
 
 #[cfg(test)]

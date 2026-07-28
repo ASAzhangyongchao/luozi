@@ -160,6 +160,21 @@ async function main() {
     }
   });
 
+  document.querySelector("#btnRailSettings")?.addEventListener("click", async () => {
+    try {
+      await invoke("open_settings_window", { section: "general" });
+    } catch (err) {
+      statusEl().textContent = `打开设置失败：${err}`;
+    }
+  });
+  document.querySelector("#btnRailGuide")?.addEventListener("click", async () => {
+    try {
+      await invoke("open_guide_window");
+    } catch (err) {
+      statusEl().textContent = `打开教程失败：${err}`;
+    }
+  });
+
   await listen("draft://updated", async (ev) => {
     await refresh();
     const reason = (ev.payload as { reason?: string } | null)?.reason;

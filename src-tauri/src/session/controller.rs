@@ -119,6 +119,7 @@ impl EnergySessionGate {
         }
     }
 
+    #[cfg(test)]
     fn deactivate_current(&self) {
         let mut state = self
             .state
@@ -130,6 +131,7 @@ impl EnergySessionGate {
     }
 }
 
+#[cfg(test)]
 fn deactivate_energy_for_cancel(gate: &EnergySessionGate, recording_session_id: Option<u64>) {
     if let Some(session_id) = recording_session_id {
         gate.deactivate(session_id);
@@ -138,25 +140,11 @@ fn deactivate_energy_for_cancel(gate: &EnergySessionGate, recording_session_id: 
     }
 }
 
-fn cancel_session_if_current(state: &AppSessionState, session_id: u64) -> bool {
-    let canceled = {
-        let Ok(mut machine) = state.machine.lock() else {
-            return false;
-        };
-        if machine.active_session_id() != Some(session_id) {
-            return false;
-        }
-        matches!(
-            machine.handle(SessionCommand::Cancel),
-            SessionEffect::Canceled {
-                session_id: canceled_session_id
-            } if canceled_session_id == session_id
-        )
-    };
-    if !canceled {
-        return false;
-    }
-
+fn cleanup_session_resources_locked(
+    state: &AppSessionState,
+    _machine: &mut SessionMachine,
+    session_id: u64,
+) {
     state.hold_active.store(false, Ordering::SeqCst);
     state.energy_session.deactivate(session_id);
     if let Ok(mut recorder) = state.recorder.lock() {
@@ -164,6 +152,63 @@ fn cancel_session_if_current(state: &AppSessionState, session_id: u64) -> bool {
     }
     let _ = state.source_target.lock().map(|mut target| *target = None);
     let _ = state.source_pid.lock().map(|mut pid| *pid = None);
+}
+
+fn cancel_session_if_current(state: &AppSessionState, session_id: u64) -> bool {
+    let Ok(mut machine) = state.machine.lock() else {
+        return false;
+    };
+    if machine.active_session_id() != Some(session_id) {
+        return false;
+    }
+    if !matches!(
+        machine.handle(SessionCommand::Cancel),
+        SessionEffect::Canceled {
+            session_id: canceled_session_id
+        } if canceled_session_id == session_id
+    ) {
+        return false;
+    }
+    cleanup_session_resources_locked(state, &mut machine, session_id);
+    true
+}
+
+fn commit_capture_if_current(state: &AppSessionState, session_id: u64, token: TargetToken) -> bool {
+    let Ok(machine) = state.machine.lock() else {
+        return false;
+    };
+    if machine.recording_session_id() != Some(session_id) {
+        return false;
+    }
+    let Ok(mut target) = state.source_target.lock() else {
+        return false;
+    };
+    let Ok(mut pid) = state.source_pid.lock() else {
+        return false;
+    };
+    let process_id = token.process_id;
+    *target = Some(token);
+    if process_id != 0 {
+        *pid = Some(process_id as i32);
+    }
+    true
+}
+
+fn commit_source_pid_if_current(
+    state: &AppSessionState,
+    session_id: u64,
+    source_pid: Option<i32>,
+) -> bool {
+    let Ok(machine) = state.machine.lock() else {
+        return false;
+    };
+    if machine.recording_session_id() != Some(session_id) {
+        return false;
+    }
+    let Ok(mut pid) = state.source_pid.lock() else {
+        return false;
+    };
+    *pid = source_pid;
     true
 }
 
@@ -1519,10 +1564,10 @@ pub fn start_session_with_token(
     match effect {
         SessionEffect::BeganRecording { session_id } => {
             // Remember where the user was typing BEFORE mic TCC / overlay.
-            let _ = state
-                .source_pid
-                .lock()
-                .map(|mut g| *g = spike::current_frontmost_pid());
+            if !commit_source_pid_if_current(state, session_id, spike::current_frontmost_pid()) {
+                let _ = cancel_session_if_current(state, session_id);
+                return status_from(state, "canceled_before_source_pid".into());
+            }
 
             let (energy_sink, energy_receiver) = energy_event_channel();
 
@@ -1533,13 +1578,9 @@ pub fn start_session_with_token(
                 Err(_) => Err("recorder_lock_failed".to_string()),
             };
             if let Err(err) = start_result {
-                state.energy_session.deactivate(session_id);
-                let _ = state
-                    .machine
-                    .lock()
-                    .map(|mut m| m.handle(SessionCommand::Cancel));
-                state.hold_active.store(false, Ordering::SeqCst);
-                emit_transient(app, Some(session_id), "error", &err);
+                if cancel_session_if_current(state, session_id) {
+                    emit_transient(app, Some(session_id), "error", &err);
+                }
                 return Err(err);
             }
 
@@ -1547,22 +1588,15 @@ pub fn start_session_with_token(
                 eprintln!(
                     "luozi: hold released during mic open (likely TCC) — cancel session {session_id}"
                 );
-                state.energy_session.deactivate(session_id);
-                if let Ok(mut rec) = state.recorder.lock() {
-                    rec.cancel();
+                if cancel_session_if_current(state, session_id) {
+                    disarm_escape(app);
+                    emit_transient(
+                        app,
+                        Some(session_id),
+                        "canceled",
+                        "已授权麦克风。请再按住说话，松手落字",
+                    );
                 }
-                let _ = state
-                    .machine
-                    .lock()
-                    .map(|mut m| m.handle(SessionCommand::Cancel));
-                let _ = state.source_target.lock().map(|mut g| *g = None);
-                disarm_escape(app);
-                emit_transient(
-                    app,
-                    Some(session_id),
-                    "canceled",
-                    "已授权麦克风。请再按住说话，松手落字",
-                );
                 return status_from(state, "canceled_after_permission".into());
             }
 
@@ -1585,7 +1619,10 @@ pub fn start_session_with_token(
                 },
             );
 
-            let _ = state.source_target.lock().map(|mut g| *g = Some(token));
+            if !commit_capture_if_current(state, session_id, token) {
+                let _ = cancel_session_if_current(state, session_id);
+                return status_from(state, "canceled_before_target_commit".into());
+            }
             arm_escape(app);
             let editing = state
                 .intent
@@ -1617,15 +1654,6 @@ pub fn start_session_with_token(
                 let Some(state) = app_cap.try_state::<AppSessionState>() else {
                     return;
                 };
-                let same_session = state
-                    .machine
-                    .lock()
-                    .ok()
-                    .and_then(|machine| machine.recording_session_id())
-                    == Some(session_id);
-                if !same_session {
-                    return;
-                }
                 if t.is_secure {
                     // Too late to reject cleanly mid-record; cancel instead.
                     if !cancel_session_if_current(&state, session_id) {
@@ -1640,12 +1668,8 @@ pub fn start_session_with_token(
                     );
                     return;
                 }
-                if t.process_id != 0 {
-                    let _ = state.source_target.lock().map(|mut g| *g = Some(t.clone()));
-                    let _ = state
-                        .source_pid
-                        .lock()
-                        .map(|mut g| *g = Some(t.process_id as i32));
+                if t.process_id != 0 && !commit_capture_if_current(&state, session_id, t.clone()) {
+                    return;
                 }
                 // Keep HUD on recording copy even if capture was soft-fail.
                 let same_session = state
@@ -1682,15 +1706,7 @@ pub fn start_session_with_token(
                 let Some(state) = app_handle.try_state::<AppSessionState>() else {
                     return;
                 };
-                let should_stop = state
-                    .machine
-                    .lock()
-                    .ok()
-                    .and_then(|m| m.recording_session_id())
-                    == Some(sid);
-                if should_stop {
-                    let _ = stop_session(&app_handle, &state);
-                }
+                let _ = stop_session_if_current(&app_handle, &state, Some(sid));
             });
 
             // Watchdog: if still Recording well past max, force-cancel (Esc-dead scenarios).
@@ -1700,15 +1716,10 @@ pub fn start_session_with_token(
                 let Some(state) = app_wd.try_state::<AppSessionState>() else {
                     return;
                 };
-                let stuck = state
-                    .machine
-                    .lock()
-                    .ok()
-                    .and_then(|m| m.recording_session_id())
-                    == Some(sid);
-                if stuck {
+                if cancel_session_if_current(&state, sid) {
                     eprintln!("luozi: watchdog force-cancel stuck recording {sid}");
-                    let _ = cancel_session(&app_wd, &state);
+                    disarm_escape(&app_wd);
+                    emit_transient(&app_wd, Some(sid), "canceled", "已取消");
                 }
             });
 
@@ -1731,7 +1742,7 @@ pub fn start_session_with_token(
                     }
                     if !state.hold_active.load(Ordering::SeqCst) {
                         eprintln!("luozi: hold inactive while recording — auto stop {sid}");
-                        let _ = stop_session(&app_hold, &state);
+                        let _ = stop_session_if_current(&app_hold, &state, Some(sid));
                         return;
                     }
                 }
@@ -1749,47 +1760,58 @@ pub fn start_session_with_token(
     }
 }
 
-pub fn stop_session(app: &AppHandle, state: &AppSessionState) -> Result<SessionStatus, String> {
-    // Duplicate Released / race after ASR started: ignore without Cancel.
-    let session_id = state
-        .machine
-        .lock()
-        .ok()
-        .and_then(|machine| machine.recording_session_id());
-    let Some(session_id) = session_id else {
-        eprintln!("luozi: stop ignored (not recording)");
-        return status_from(state, "stop_ignored".into());
-    };
-    state.energy_session.deactivate(session_id);
-
-    let duration_ms = state
-        .recorder
-        .lock()
-        .map_err(|_| "recorder_lock_failed".to_string())?
-        .elapsed_ms();
-
-    let audio = match state
-        .recorder
-        .lock()
-        .map_err(|_| "recorder_lock_failed".to_string())?
-        .stop()
-    {
-        Ok(a) => Some(a),
-        Err(err) if err == "not_recording" => {
-            eprintln!("luozi: stop not_recording (no cancel)");
+fn stop_session_if_current(
+    app: &AppHandle,
+    state: &AppSessionState,
+    expected_session_id: Option<u64>,
+) -> Result<SessionStatus, String> {
+    let (audio, effect) = {
+        let mut machine = state.machine.lock().map_err(|_| "session_lock_failed")?;
+        let Some(session_id) = machine.recording_session_id() else {
+            drop(machine);
+            eprintln!("luozi: stop ignored (not recording)");
+            return status_from(state, "stop_ignored".into());
+        };
+        if expected_session_id.is_some_and(|expected| expected != session_id) {
+            drop(machine);
+            eprintln!(
+                "luozi: stop ignored (expected {:?}, active {session_id})",
+                expected_session_id
+            );
             return status_from(state, "stop_ignored".into());
         }
-        Err(err) => {
-            let _ = cancel_session(app, state);
-            return Err(err);
+
+        state.energy_session.deactivate(session_id);
+        let stop_result = match state.recorder.lock() {
+            Ok(mut recorder) => {
+                let _elapsed_ms = recorder.elapsed_ms();
+                recorder.stop()
+            }
+            Err(_) => Err("recorder_lock_failed".to_string()),
+        };
+        let audio = match stop_result {
+            Ok(audio) => audio,
+            Err(err) => {
+                let _ = machine.handle(SessionCommand::Cancel);
+                cleanup_session_resources_locked(state, &mut machine, session_id);
+                drop(machine);
+                disarm_escape(app);
+                if err == "not_recording" {
+                    eprintln!("luozi: stop not_recording (session canceled)");
+                    return status_from(state, "stop_ignored".into());
+                }
+                emit_transient(app, Some(session_id), "canceled", "已取消");
+                return Err(err);
+            }
+        };
+
+        let effect = machine.handle(SessionCommand::Stop {
+            duration_ms: audio.duration_ms,
+        });
+        if matches!(effect, SessionEffect::RejectedTooShort { .. }) {
+            cleanup_session_resources_locked(state, &mut machine, session_id);
         }
-    };
-
-    let duration_ms = audio.as_ref().map(|a| a.duration_ms).unwrap_or(duration_ms);
-
-    let effect = {
-        let mut machine = state.machine.lock().map_err(|_| "session_lock_failed")?;
-        machine.handle(SessionCommand::Stop { duration_ms })
+        (audio, effect)
     };
 
     match effect {
@@ -1802,12 +1824,9 @@ pub fn stop_session(app: &AppHandle, state: &AppSessionState) -> Result<SessionS
         SessionEffect::BeginTranscribe { session_id } => {
             emit_phase(app, Some(session_id), "transcribing", "落字中");
             let language = super::config_store::load().language;
-            let Some(capture) = audio else {
-                return fail_transcribe(app, state, session_id, "asr_no_audio".into());
-            };
 
             spawn_transcribe_watchdog(app.clone(), session_id);
-            finish_transcribe_async(app.clone(), session_id, duration_ms, capture, language);
+            finish_transcribe_async(app.clone(), session_id, audio.duration_ms, audio, language);
             status_from(state, "transcribing".into())
         }
         SessionEffect::RejectedBusy => {
@@ -1818,35 +1837,26 @@ pub fn stop_session(app: &AppHandle, state: &AppSessionState) -> Result<SessionS
     }
 }
 
+pub fn stop_session(app: &AppHandle, state: &AppSessionState) -> Result<SessionStatus, String> {
+    stop_session_if_current(app, state, None)
+}
+
 pub fn cancel_session(app: &AppHandle, state: &AppSessionState) -> Result<SessionStatus, String> {
-    state.hold_active.store(false, Ordering::SeqCst);
-    let _ = state.source_pid.lock().map(|mut g| *g = None);
-    let recording_session_id = state
+    let session_id = state
         .machine
         .lock()
         .ok()
-        .and_then(|machine| machine.recording_session_id());
-    deactivate_energy_for_cancel(&state.energy_session, recording_session_id);
-    if let Ok(mut rec) = state.recorder.lock() {
-        rec.cancel();
-    }
-    let effect = {
-        let mut machine = state.machine.lock().map_err(|_| "session_lock_failed")?;
-        machine.handle(SessionCommand::Cancel)
+        .and_then(|machine| machine.active_session_id());
+    let Some(session_id) = session_id else {
+        hide_overlay_if_idle(app, state);
+        return status_from(state, "idle".into());
     };
-    let _ = state.source_target.lock().map(|mut g| *g = None);
-    disarm_escape(app);
-    match effect {
-        SessionEffect::Canceled { session_id } => {
-            emit_transient(app, Some(session_id), "canceled", "已取消");
-            status_from(state, "canceled".into())
-        }
-        SessionEffect::RejectedBusy => {
-            hide_overlay_if_idle(app, state);
-            status_from(state, "idle".into())
-        }
-        other => Err(format!("unexpected_cancel_effect: {other:?}")),
+    if !cancel_session_if_current(state, session_id) {
+        return status_from(state, "cancel_ignored".into());
     }
+    disarm_escape(app);
+    emit_transient(app, Some(session_id), "canceled", "已取消");
+    status_from(state, "canceled".into())
 }
 
 pub fn undo_last(app: &AppHandle, state: &AppSessionState) -> Result<SessionStatus, String> {
@@ -2028,6 +2038,113 @@ mod hud_tests {
                 "sessionId": null,
             }),
         );
+    }
+}
+
+#[cfg(test)]
+mod session_resource_tests {
+    use super::{
+        cancel_session_if_current, commit_capture_if_current, dummy_token, AppSessionState,
+        SessionCommand, SessionEffect,
+    };
+    use std::sync::atomic::Ordering;
+
+    fn begin_session(state: &AppSessionState) -> u64 {
+        let effect = state
+            .machine
+            .lock()
+            .expect("machine lock")
+            .handle(SessionCommand::Start);
+        match effect {
+            SessionEffect::BeganRecording { session_id } => session_id,
+            other => panic!("expected recording, got {other:?}"),
+        }
+    }
+
+    fn target(process_id: u32) -> super::TargetToken {
+        let mut token = dummy_token();
+        token.process_id = process_id;
+        token
+    }
+
+    #[test]
+    fn stale_session_cannot_cancel_new_session_resources() {
+        let state = AppSessionState::default();
+        let old_session_id = begin_session(&state);
+        assert!(cancel_session_if_current(&state, old_session_id));
+
+        let new_session_id = begin_session(&state);
+        state.hold_active.store(true, Ordering::SeqCst);
+        *state.source_target.lock().expect("target lock") = Some(target(202));
+        *state.source_pid.lock().expect("pid lock") = Some(202);
+
+        assert!(!cancel_session_if_current(&state, old_session_id));
+        assert_eq!(
+            state
+                .machine
+                .lock()
+                .expect("machine lock")
+                .recording_session_id(),
+            Some(new_session_id),
+        );
+        assert!(state.hold_active.load(Ordering::SeqCst));
+        assert_eq!(
+            state
+                .source_target
+                .lock()
+                .expect("target lock")
+                .as_ref()
+                .map(|token| token.process_id),
+            Some(202),
+        );
+        assert_eq!(*state.source_pid.lock().expect("pid lock"), Some(202));
+    }
+
+    #[test]
+    fn stale_capture_cannot_overwrite_new_session_target() {
+        let state = AppSessionState::default();
+        let old_session_id = begin_session(&state);
+        assert!(cancel_session_if_current(&state, old_session_id));
+        let new_session_id = begin_session(&state);
+        assert!(commit_capture_if_current(
+            &state,
+            new_session_id,
+            target(202),
+        ));
+
+        assert!(!commit_capture_if_current(
+            &state,
+            old_session_id,
+            target(101),
+        ));
+        assert_eq!(
+            state
+                .source_target
+                .lock()
+                .expect("target lock")
+                .as_ref()
+                .map(|token| token.process_id),
+            Some(202),
+        );
+        assert_eq!(*state.source_pid.lock().expect("pid lock"), Some(202));
+    }
+
+    #[test]
+    fn current_capture_commits_target_and_pid() {
+        let state = AppSessionState::default();
+        let session_id = begin_session(&state);
+
+        assert!(commit_capture_if_current(&state, session_id, target(303)));
+        assert_eq!(
+            state
+                .source_target
+                .lock()
+                .expect("target lock")
+                .as_ref()
+                .map(|token| token.process_id),
+            Some(303),
+        );
+        assert_eq!(*state.source_pid.lock().expect("pid lock"), Some(303));
     }
 }
 

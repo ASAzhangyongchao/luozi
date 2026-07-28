@@ -32,8 +32,6 @@ pub enum SessionIntent {
 
 /// Whisper + deliver must not hang the session forever (stuck busy overlay).
 const TRANSCRIBE_WATCHDOG_MS: u64 = 45_000;
-/// Brief status on overlay before auto-dismiss (inserted / canceled / errors).
-const OVERLAY_AUTO_HIDE_MS: u64 = 2_200;
 
 #[derive(Clone, Default)]
 struct EnergySessionGate {
@@ -202,20 +200,53 @@ fn phase_name(phase: &SessionPhase) -> &'static str {
     }
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HudPhasePayload<'a> {
+    phase: &'a str,
+    message: &'a str,
+    session_id: Option<u64>,
+}
+
+fn active_session_id(app: &AppHandle) -> Option<u64> {
+    app.try_state::<AppSessionState>().and_then(|state| {
+        state
+            .machine
+            .lock()
+            .ok()
+            .and_then(|machine| machine.active_session_id())
+    })
+}
+
 fn emit_phase(app: &AppHandle, phase: &str, message: &str) {
     let _ = app.emit(
         "session://phase",
-        serde_json::json!({ "phase": phase, "message": message }),
+        HudPhasePayload {
+            phase,
+            message,
+            session_id: active_session_id(app),
+        },
     );
+}
+
+fn transient_duration_ms(phase: &str) -> u64 {
+    match phase {
+        "inserted" | "undone" => 600,
+        "canceled" | "too_short" => 1_600,
+        "clipboard" => 3_500,
+        "error" | "rejected" | "discarded" | "warn" => 5_000,
+        _ => 2_200,
+    }
 }
 
 /// Show overlay with a short-lived status, then hide (does not block).
 fn emit_transient(app: &AppHandle, phase: &str, message: &str) {
     show_overlay(app, true);
     emit_phase(app, phase, message);
+    let duration_ms = transient_duration_ms(phase);
     let app = app.clone();
     std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(OVERLAY_AUTO_HIDE_MS));
+        std::thread::sleep(std::time::Duration::from_millis(duration_ms));
         // Only hide if we are idle — avoid racing a new recording that started.
         if let Some(state) = app.try_state::<AppSessionState>() {
             let idle = state
@@ -227,10 +258,17 @@ fn emit_transient(app: &AppHandle, phase: &str, message: &str) {
             if idle {
                 show_overlay(&app, false);
             }
-        } else {
-            show_overlay(&app, false);
         }
     });
+}
+
+fn registered_shortcut_label(state: &AppSessionState) -> String {
+    state
+        .registered_continue
+        .lock()
+        .ok()
+        .and_then(|value| value.clone())
+        .unwrap_or_else(|| super::config_store::load().continue_speaking_shortcut)
 }
 
 fn touch_asr_used(state: &AppSessionState) {
@@ -437,21 +475,6 @@ fn finish_transcribe_async(
                         session_id,
                         ok: ok.machine_ok(),
                     })
-                });
-                let app2 = app.clone();
-                std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_millis(OVERLAY_AUTO_HIDE_MS));
-                    if let Some(state) = app2.try_state::<AppSessionState>() {
-                        if state
-                            .machine
-                            .lock()
-                            .ok()
-                            .map(|m| m.is_idle())
-                            .unwrap_or(true)
-                        {
-                            show_overlay(&app2, false);
-                        }
-                    }
                 });
             }
             SessionEffect::StaleIgnored { .. } => {
@@ -1411,7 +1434,12 @@ pub fn start_session_with_token(
             if editing {
                 emit_phase(app, "recording_edit", "说修改要求… · Esc 取消");
             } else {
-                emit_phase(app, "recording", "听写中 · Esc 取消");
+                let shortcut = registered_shortcut_label(state);
+                emit_phase(
+                    app,
+                    "recording",
+                    &format!("松开 {shortcut} 开始整理 · Esc 取消"),
+                );
             }
 
             // Best-effort focus capture in background (never blocks start).
@@ -1438,7 +1466,16 @@ pub fn start_session_with_token(
                 // Keep HUD on recording copy even if capture was soft-fail.
                 if let Some(state) = app_cap.try_state::<AppSessionState>() {
                     if is_recording_phase(&state) {
-                        emit_phase(&app_cap, "recording", "听写中 · Esc 取消");
+                        if editing {
+                            emit_phase(&app_cap, "recording_edit", "说修改要求… · Esc 取消");
+                        } else {
+                            let shortcut = registered_shortcut_label(&state);
+                            emit_phase(
+                                &app_cap,
+                                "recording",
+                                &format!("松开 {shortcut} 开始整理 · Esc 取消"),
+                            );
+                        }
                     }
                 }
             });
@@ -1686,6 +1723,45 @@ pub fn session_undo_last(
 #[tauri::command]
 pub fn session_status(state: State<'_, AppSessionState>) -> Result<SessionStatus, String> {
     status_from(&state, "ok".into())
+}
+
+#[cfg(test)]
+mod hud_tests {
+    use super::{transient_duration_ms, HudPhasePayload};
+
+    #[test]
+    fn inserted_feedback_is_brief() {
+        assert_eq!(transient_duration_ms("inserted"), 600);
+    }
+
+    #[test]
+    fn clipboard_feedback_remains_readable() {
+        assert_eq!(transient_duration_ms("clipboard"), 3_500);
+    }
+
+    #[test]
+    fn errors_remain_readable() {
+        assert_eq!(transient_duration_ms("error"), 5_000);
+        assert_eq!(transient_duration_ms("rejected"), 5_000);
+    }
+
+    #[test]
+    fn phase_payload_serializes_session_id_in_camel_case() {
+        let payload = HudPhasePayload {
+            phase: "recording",
+            message: "listening",
+            session_id: Some(42),
+        };
+
+        assert_eq!(
+            serde_json::to_value(payload).expect("serialize HUD phase payload"),
+            serde_json::json!({
+                "phase": "recording",
+                "message": "listening",
+                "sessionId": 42,
+            }),
+        );
+    }
 }
 
 #[cfg(test)]

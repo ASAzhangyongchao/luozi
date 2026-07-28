@@ -80,7 +80,177 @@
           <strong>设置</strong>
           <button type="button" id="btnCloseSettings" class="settings-dialog-close" aria-label="关闭设置">关闭</button>
         </div>
-        <iframe id="settingsFrame" class="settings-frame" title="设置" src="about:blank"></iframe>
+        <div class="settings-shell" id="settingsRoot">
+          <nav class="settings-nav" aria-label="设置分区">
+            <button type="button" class="nav-item active" data-section="general">通用</button>
+            <button type="button" class="nav-item" data-section="voice">语音与 AI</button>
+            <button type="button" class="nav-item" data-section="hotkeys">快捷键</button>
+            <button type="button" class="nav-item" data-section="permissions">权限</button>
+            <button type="button" class="nav-item" data-section="about">关于</button>
+          </nav>
+          <main class="settings-main">
+            <section id="section-general" class="settings-section">
+              <h1>通用</h1>
+              <div class="row">
+                <div>
+                  <strong>当前草稿自动恢复</strong>
+                  <p class="muted">关闭窗口会刷盘；重开语音草稿可恢复正文</p>
+                </div>
+                <span class="badge ok">已开启</span>
+              </div>
+              <div class="row">
+                <div>
+                  <strong>界面语言</strong>
+                  <p class="muted">当前固定简体中文</p>
+                </div>
+                <span class="badge">简体中文</span>
+              </div>
+              <details class="coming-soon">
+                <summary>即将支持</summary>
+                <div class="row">
+                  <div>
+                    <strong>登录时启动</strong>
+                    <p class="muted">Login Item；开机后自动在托盘待命</p>
+                  </div>
+                  <span class="badge">规划中</span>
+                </div>
+                <div class="row">
+                  <div>
+                    <strong>完整中英切换</strong>
+                    <p class="muted">界面语言可在简体中文 / English 间切换</p>
+                  </div>
+                  <span class="badge">规划中</span>
+                </div>
+              </details>
+            </section>
+
+            <section id="section-voice" class="settings-section" hidden>
+              <h1>语音与 AI</h1>
+              <h2>语音转写（ASR）</h2>
+              <div class="row">
+                <div>
+                  <strong>引擎模式</strong>
+                  <p class="muted" id="asrModeHint">自动（本地优先）</p>
+                </div>
+                <button type="button" id="btnCycleAsr">切换模式</button>
+              </div>
+              <div class="row">
+                <div>
+                  <strong>本地模型</strong>
+                  <p class="muted" id="modelStatus">—</p>
+                </div>
+                <span class="badge" id="modelBadge">—</span>
+              </div>
+              <div class="row">
+                <div>
+                  <strong>云端 ASR（Groq）</strong>
+                  <p class="muted" id="cloudAsrStatus">—</p>
+                </div>
+                <div class="btn-group">
+                  <button type="button" id="btnAsrKey">配置 Key…</button>
+                  <button type="button" id="btnAsrConsent">同意上传…</button>
+                </div>
+              </div>
+
+              <h2>文本 AI（修改 / 润色）</h2>
+              <div class="row">
+                <div>
+                  <strong>文本 AI</strong>
+                  <p class="muted" id="textAiStatus">—</p>
+                </div>
+                <div class="btn-group">
+                  <button type="button" id="btnTextAiKey">配置 Key…</button>
+                  <button type="button" id="btnTextAiConsent">同意上传…</button>
+                </div>
+              </div>
+              <p class="note">
+                ASR 与文本 AI 分开授权；即使同一主机也要各自同意。Key 只存本机钥匙串。
+              </p>
+            </section>
+
+            <section id="section-hotkeys" class="settings-section" hidden>
+              <h1>快捷键</h1>
+              <p class="note">本版只读展示；录制改键放在后续切片。</p>
+              <div class="row">
+                <div>
+                  <strong>继续说</strong>
+                  <p class="muted">按住说话，松手落字 / 写入草稿</p>
+                </div>
+                <div class="btn-group">
+                  <code id="hkContinue">—</code>
+                  <button type="button" data-copy="hkContinue">复制</button>
+                </div>
+              </div>
+              <div class="row">
+                <div>
+                  <strong>说修改要求</strong>
+                  <p class="muted">按住录修改指令，松手调用文本 AI</p>
+                </div>
+                <div class="btn-group">
+                  <code id="hkEdit">—</code>
+                  <button type="button" data-copy="hkEdit">复制</button>
+                </div>
+              </div>
+              <div class="row">
+                <div>
+                  <strong>取消</strong>
+                  <p class="muted">录音 / 转写中取消</p>
+                </div>
+                <code>Escape</code>
+              </div>
+              <p class="muted" id="hkRegistered"></p>
+            </section>
+
+            <section id="section-permissions" class="settings-section" hidden>
+              <h1>权限</h1>
+              <div class="row">
+                <div>
+                  <strong>麦克风</strong>
+                  <p class="muted">录音需要麦克风权限；首次按住说话时系统会询问</p>
+                </div>
+                <button type="button" id="btnOpenMic">打开系统设置</button>
+              </div>
+              <div class="row">
+                <div>
+                  <strong>辅助功能</strong>
+                  <p class="muted" id="axStatus">用于向其他 App 插入文字；失败则降级剪贴板</p>
+                </div>
+                <button type="button" id="btnOpenAx">打开系统设置</button>
+              </div>
+              <p class="note">
+                ad-hoc 重装后签名变化，可能需要在辅助功能里关掉再打开「落字」。
+              </p>
+            </section>
+
+            <section id="section-about" class="settings-section" hidden>
+              <h1>关于落字</h1>
+              <div class="about-hero">
+                <img src="./assets/brand/luozi-mark.svg" width="48" height="48" alt="" />
+                <div>
+                  <strong>落字 Luozi</strong>
+                  <p class="muted">版本 <span id="aboutVersion">—</span></p>
+                </div>
+              </div>
+              <p>
+                本地优先的快捷语音转文字。无落字账号、无官方中转；云端能力由你自备 Key（BYOK）。
+              </p>
+              <div class="btn-group wrap">
+                <button type="button" id="btnRepo">开源仓库</button>
+                <button type="button" id="btnReleases">查看更新</button>
+                <button type="button" id="btnSpike">打开开发 Spike…</button>
+              </div>
+              <h2>隐私摘要</h2>
+              <ul class="plain">
+                <li>默认本地转写；未同意不上传音频或正文</li>
+                <li>ASR / 文本 AI 分项授权，日志不记录 Key 与全文</li>
+                <li>模型与密钥不进入 Git</li>
+              </ul>
+              <p class="muted">MIT License · 反馈请开 GitHub Issue</p>
+            </section>
+
+            <p id="settingsToast" class="toast" aria-live="polite"></p>
+          </main>
+        </div>
       </dialog>
 
       <footer class="wb-footer">

@@ -239,6 +239,10 @@ fn transient_duration_ms(phase: &str) -> u64 {
     }
 }
 
+fn undo_feedback() -> (&'static str, &'static str) {
+    ("undone", "已撤销剪贴板落字")
+}
+
 /// Show overlay with a short-lived status, then hide (does not block).
 fn emit_transient(app: &AppHandle, phase: &str, message: &str) {
     show_overlay(app, true);
@@ -1661,7 +1665,8 @@ pub fn undo_last(app: &AppHandle, state: &AppSessionState) -> Result<SessionStat
         .lock()
         .map_err(|_| "clipboard_lock_failed")?;
     gate.undo_last()?;
-    emit_phase(app, "undone", "已撤销剪贴板落字");
+    let (phase, message) = undo_feedback();
+    emit_transient(app, phase, message);
     drop(gate);
     status_from(state, "undone".into())
 }
@@ -1727,11 +1732,21 @@ pub fn session_status(state: State<'_, AppSessionState>) -> Result<SessionStatus
 
 #[cfg(test)]
 mod hud_tests {
-    use super::{transient_duration_ms, HudPhasePayload};
+    use super::{transient_duration_ms, undo_feedback, HudPhasePayload};
 
     #[test]
     fn inserted_feedback_is_brief() {
         assert_eq!(transient_duration_ms("inserted"), 600);
+    }
+
+    #[test]
+    fn undone_feedback_is_brief() {
+        assert_eq!(transient_duration_ms("undone"), 600);
+    }
+
+    #[test]
+    fn undo_uses_transient_feedback_phase() {
+        assert_eq!(undo_feedback(), ("undone", "已撤销剪贴板落字"));
     }
 
     #[test]

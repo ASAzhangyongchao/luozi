@@ -25,6 +25,10 @@ body {
   -webkit-user-select: none;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 /* Compact Typeless-like pill — fills the small overlay window. */
 .overlay {
   box-sizing: border-box;
@@ -68,8 +72,9 @@ body {
   flex: 1 1 auto;
 }
 
-.overlay.interactive .label {
-  display: none;
+.overlay.interactive .mark,
+.overlay.interactive .pulse {
+  display: none !important;
 }
 
 .hud-btn {
@@ -216,8 +221,10 @@ body {
   -webkit-user-select: none;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 9rem;
-  opacity: 0.92;
+  max-width: 7.5rem;
+  opacity: 0.95;
+  font-size: 0.8rem;
+  font-weight: 600;
 }
 
 .pulse {

@@ -38,6 +38,64 @@ struct EnergySessionGate {
     state: Arc<Mutex<Option<(u64, bool)>>>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct HudCommand {
+    generation: u64,
+    visible: bool,
+}
+
+#[derive(Default)]
+struct HudLifecycleState {
+    generation: u64,
+    desired_visible: bool,
+}
+
+#[derive(Clone, Default)]
+struct HudLifecycle {
+    state: Arc<Mutex<HudLifecycleState>>,
+}
+
+impl HudLifecycle {
+    fn request_visibility(&self, visible: bool) -> HudCommand {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.generation = state
+            .generation
+            .checked_add(1)
+            .expect("HUD generation overflow");
+        state.desired_visible = visible;
+        HudCommand {
+            generation: state.generation,
+            visible,
+        }
+    }
+
+    fn expire_transient(&self, generation: u64) -> Option<HudCommand> {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if state.generation != generation || !state.desired_visible {
+            return None;
+        }
+        state.desired_visible = false;
+        Some(HudCommand {
+            generation,
+            visible: false,
+        })
+    }
+
+    fn command_is_current(&self, command: HudCommand) -> bool {
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.generation == command.generation && state.desired_visible == command.visible
+    }
+}
+
 impl EnergySessionGate {
     fn activate(&self, session_id: u64) -> bool {
         let mut state = self
@@ -78,6 +136,35 @@ fn deactivate_energy_for_cancel(gate: &EnergySessionGate, recording_session_id: 
     } else {
         gate.deactivate_current();
     }
+}
+
+fn cancel_session_if_current(state: &AppSessionState, session_id: u64) -> bool {
+    let canceled = {
+        let Ok(mut machine) = state.machine.lock() else {
+            return false;
+        };
+        if machine.active_session_id() != Some(session_id) {
+            return false;
+        }
+        matches!(
+            machine.handle(SessionCommand::Cancel),
+            SessionEffect::Canceled {
+                session_id: canceled_session_id
+            } if canceled_session_id == session_id
+        )
+    };
+    if !canceled {
+        return false;
+    }
+
+    state.hold_active.store(false, Ordering::SeqCst);
+    state.energy_session.deactivate(session_id);
+    if let Ok(mut recorder) = state.recorder.lock() {
+        recorder.cancel();
+    }
+    let _ = state.source_target.lock().map(|mut target| *target = None);
+    let _ = state.source_pid.lock().map(|mut pid| *pid = None);
+    true
 }
 
 fn forward_energy_if_active(
@@ -156,6 +243,7 @@ pub struct AppSessionState {
     /// Continue dictation vs voice-edit instruction (M7).
     pub intent: Mutex<SessionIntent>,
     energy_session: EnergySessionGate,
+    hud_lifecycle: HudLifecycle,
     #[allow(dead_code)]
     pub config: AppConfig,
 }
@@ -175,6 +263,7 @@ impl Default for AppSessionState {
             model_fetching: AtomicBool::new(false),
             intent: Mutex::new(SessionIntent::Continue),
             energy_session: EnergySessionGate::default(),
+            hud_lifecycle: HudLifecycle::default(),
             config: super::config_store::load(),
         }
     }
@@ -208,25 +297,30 @@ struct HudPhasePayload<'a> {
     session_id: Option<u64>,
 }
 
-fn active_session_id(app: &AppHandle) -> Option<u64> {
-    app.try_state::<AppSessionState>().and_then(|state| {
-        state
-            .machine
-            .lock()
-            .ok()
-            .and_then(|machine| machine.active_session_id())
-    })
+fn hud_phase_payload<'a>(
+    phase: &'a str,
+    message: &'a str,
+    session_id: Option<u64>,
+) -> HudPhasePayload<'a> {
+    HudPhasePayload {
+        phase,
+        message,
+        session_id,
+    }
 }
 
-fn emit_phase(app: &AppHandle, phase: &str, message: &str) {
+fn emit_phase(
+    app: &AppHandle,
+    session_id: Option<u64>,
+    phase: &str,
+    message: &str,
+) -> Option<HudCommand> {
+    let command = show_overlay(app, true);
     let _ = app.emit(
         "session://phase",
-        HudPhasePayload {
-            phase,
-            message,
-            session_id: active_session_id(app),
-        },
+        hud_phase_payload(phase, message, session_id),
     );
+    command
 }
 
 fn transient_duration_ms(phase: &str) -> u64 {
@@ -244,24 +338,29 @@ fn undo_feedback() -> (&'static str, &'static str) {
 }
 
 /// Show overlay with a short-lived status, then hide (does not block).
-fn emit_transient(app: &AppHandle, phase: &str, message: &str) {
-    show_overlay(app, true);
-    emit_phase(app, phase, message);
+fn emit_transient(app: &AppHandle, session_id: Option<u64>, phase: &str, message: &str) {
+    let Some(command) = emit_phase(app, session_id, phase, message) else {
+        return;
+    };
     let duration_ms = transient_duration_ms(phase);
     let app = app.clone();
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(duration_ms));
-        // Only hide if we are idle — avoid racing a new recording that started.
-        if let Some(state) = app.try_state::<AppSessionState>() {
-            let idle = state
-                .machine
-                .lock()
-                .ok()
-                .map(|m| m.is_idle())
-                .unwrap_or(true);
-            if idle {
-                show_overlay(&app, false);
+        let Some(state) = app.try_state::<AppSessionState>() else {
+            return;
+        };
+        let lifecycle = state.hud_lifecycle.clone();
+        let hide = {
+            let Ok(machine) = state.machine.lock() else {
+                return;
+            };
+            if !machine.is_idle() {
+                return;
             }
+            lifecycle.expire_transient(command.generation)
+        };
+        if let Some(hide) = hide {
+            apply_overlay_command(&app, lifecycle, hide);
         }
     });
 }
@@ -318,7 +417,7 @@ pub fn fetch_recommended_model(app: &AppHandle, state: &AppSessionState) {
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_err()
     {
-        emit_transient(app, "warn", "模型正在下载中…");
+        emit_transient(app, None, "warn", "模型正在下载中…");
         return;
     }
     let app = app.clone();
@@ -326,7 +425,7 @@ pub fn fetch_recommended_model(app: &AppHandle, state: &AppSessionState) {
         let Some(state) = app.try_state::<AppSessionState>() else {
             return;
         };
-        emit_transient(&app, "transcribing", "正在下载推荐模型…");
+        emit_transient(&app, None, "transcribing", "正在下载推荐模型…");
         let result = super::model_store::ensure_recommended_model(|pct, phase| {
             let _ = app.emit(
                 "model://progress",
@@ -340,11 +439,11 @@ pub fn fetch_recommended_model(app: &AppHandle, state: &AppSessionState) {
         match result {
             Ok(path) => {
                 eprintln!("luozi: model fetch ok → {}", path.display());
-                emit_transient(&app, "inserted", "模型已就绪，可按住说话");
+                emit_transient(&app, None, "inserted", "模型已就绪，可按住说话");
             }
             Err(err) => {
                 eprintln!("luozi: model fetch failed: {err}");
-                emit_transient(&app, "error", &err);
+                emit_transient(&app, None, "error", &err);
             }
         }
     });
@@ -356,32 +455,10 @@ fn spawn_transcribe_watchdog(app: AppHandle, session_id: u64) {
         let Some(state) = app.try_state::<AppSessionState>() else {
             return;
         };
-        let stuck = state
-            .machine
-            .lock()
-            .ok()
-            .and_then(|m| match m.phase() {
-                SessionPhase::Transcribing { session_id: sid }
-                | SessionPhase::Delivering { session_id: sid }
-                    if *sid == session_id =>
-                {
-                    Some(*sid)
-                }
-                _ => None,
-            })
-            .is_some();
-        if stuck {
+        if cancel_session_if_current(&state, session_id) {
             eprintln!("luozi: watchdog force-cancel stuck transcribe/deliver {session_id}");
-            if let Ok(mut rec) = state.recorder.lock() {
-                rec.cancel();
-            }
-            let _ = state
-                .machine
-                .lock()
-                .map(|mut m| m.handle(SessionCommand::Cancel));
-            let _ = state.source_target.lock().map(|mut g| *g = None);
             disarm_escape(&app);
-            emit_transient(&app, "error", "落字超时，已取消，请重试");
+            emit_transient(&app, Some(session_id), "error", "落字超时，已取消，请重试");
         }
     });
 }
@@ -403,7 +480,7 @@ fn finish_transcribe_async(
         let pcm =
             asr::resample_to_16k_mono(&capture.samples, capture.sample_rate, capture.channels);
         if pcm.is_empty() {
-            let _ = fail_transcribe(&app, &state, "no_speech".into());
+            let _ = fail_transcribe(&app, &state, session_id, "no_speech".into());
             return;
         }
 
@@ -418,7 +495,7 @@ fn finish_transcribe_async(
             }
             Err(err) => {
                 eprintln!("luozi: asr failed: {err}");
-                let _ = fail_transcribe(&app, &state, err);
+                let _ = fail_transcribe(&app, &state, session_id, err);
                 return;
             }
         };
@@ -436,7 +513,7 @@ fn finish_transcribe_async(
 
         if intent == SessionIntent::VoiceEdit {
             // Consume session machine so we leave busy state, then apply text AI to draft.
-            let _ = {
+            let edit_effect = {
                 let Ok(mut machine) = state.machine.lock() else {
                     return;
                 };
@@ -445,6 +522,26 @@ fn finish_transcribe_async(
                     text: transcript.clone(),
                 })
             };
+            match edit_effect {
+                SessionEffect::Deliver {
+                    session_id: accepted_session_id,
+                    ..
+                } if accepted_session_id == session_id => {}
+                SessionEffect::StaleIgnored { .. } => {
+                    eprintln!("luozi: voice edit transcript stale");
+                    hide_overlay_if_idle(&app, &state);
+                    return;
+                }
+                other => {
+                    let _ = fail_transcribe(
+                        &app,
+                        &state,
+                        session_id,
+                        format!("unexpected_voice_edit_effect: {other:?}"),
+                    );
+                    return;
+                }
+            }
             // Force idle regardless of delivery effect.
             let _ = state.machine.lock().map(|mut m| {
                 m.handle(SessionCommand::DeliveryFinished {
@@ -453,7 +550,7 @@ fn finish_transcribe_async(
                 })
             });
             disarm_escape(&app);
-            apply_voice_edit(&app, &state, &cfg, &transcript);
+            apply_voice_edit(&app, &state, &cfg, session_id, &transcript);
             return;
         }
 
@@ -473,7 +570,7 @@ fn finish_transcribe_async(
                 disarm_escape(&app);
                 show_overlay(&app, false);
                 std::thread::sleep(std::time::Duration::from_millis(80));
-                let ok = apply_delivery(&app, &state, &text);
+                let ok = apply_delivery(&app, &state, session_id, &text);
                 let _ = state.machine.lock().map(|mut m| {
                     m.handle(SessionCommand::DeliveryFinished {
                         session_id,
@@ -484,13 +581,14 @@ fn finish_transcribe_async(
             SessionEffect::StaleIgnored { .. } => {
                 eprintln!("luozi: transcript stale (canceled during ASR)");
                 disarm_escape(&app);
-                show_overlay(&app, false);
+                hide_overlay_if_idle(&app, &state);
             }
             other => {
                 eprintln!("luozi: unexpected_transcribe_effect: {other:?}");
                 let _ = fail_transcribe(
                     &app,
                     &state,
+                    session_id,
                     format!("unexpected_transcribe_effect: {other:?}"),
                 );
             }
@@ -646,37 +744,39 @@ pub fn capture_source_token(app: &AppHandle) -> TargetToken {
     }
 }
 
-fn show_overlay(app: &AppHandle, visible: bool) {
-    // Never block session control; never use the short AX timeout (hide was failing
-    // silently and leaving the HUD stuck on the last message).
+fn apply_overlay_command(app: &AppHandle, lifecycle: HudLifecycle, command: HudCommand) {
     let app = app.clone();
-    std::thread::spawn(move || {
-        let app2 = app.clone();
-        let (tx, rx) = std::sync::mpsc::sync_channel(1);
-        if app
-            .run_on_main_thread(move || {
-                if let Some(window) = app2.get_webview_window("overlay") {
-                    let _ = window.set_ignore_cursor_events(true);
-                    let _ = window.set_background_color(Some(tauri::window::Color(0, 0, 0, 0)));
-                    if visible {
-                        let _ = window.show();
-                    } else {
-                        let _ = window.hide();
-                    }
-                }
-                let _ = tx.send(());
-            })
-            .is_err()
-        {
+    let _ = app.clone().run_on_main_thread(move || {
+        if !lifecycle.command_is_current(command) {
             return;
         }
-        if rx.recv_timeout(std::time::Duration::from_secs(2)).is_err() {
-            eprintln!(
-                "luozi: overlay {} timed out on main thread",
-                if visible { "show" } else { "hide" }
-            );
+        if let Some(window) = app.get_webview_window("overlay") {
+            let _ = window.set_ignore_cursor_events(true);
+            let _ = window.set_background_color(Some(tauri::window::Color(0, 0, 0, 0)));
+            if command.visible {
+                let _ = window.show();
+            } else {
+                let _ = window.hide();
+            }
         }
     });
+}
+
+fn show_overlay(app: &AppHandle, visible: bool) -> Option<HudCommand> {
+    let state = app.try_state::<AppSessionState>()?;
+    let lifecycle = state.hud_lifecycle.clone();
+    let command = lifecycle.request_visibility(visible);
+    apply_overlay_command(app, lifecycle, command);
+    Some(command)
+}
+
+fn hide_overlay_if_idle(app: &AppHandle, state: &AppSessionState) {
+    let Ok(machine) = state.machine.lock() else {
+        return;
+    };
+    if machine.is_idle() {
+        show_overlay(app, false);
+    }
 }
 
 #[derive(Debug)]
@@ -740,25 +840,31 @@ fn map_text_ai_err(err: &str) -> &'static str {
     }
 }
 
-fn apply_voice_edit(app: &AppHandle, _state: &AppSessionState, cfg: &AppConfig, instruction: &str) {
+fn apply_voice_edit(
+    app: &AppHandle,
+    _state: &AppSessionState,
+    cfg: &AppConfig,
+    session_id: u64,
+    instruction: &str,
+) {
     let instruction = instruction.trim();
     if instruction.is_empty() {
-        emit_transient(app, "error", "没听清修改要求");
+        emit_transient(app, Some(session_id), "error", "没听清修改要求");
         return;
     }
 
     let Some(draft) = app.try_state::<super::DraftStore>() else {
-        emit_transient(app, "error", "草稿不可用");
+        emit_transient(app, Some(session_id), "error", "草稿不可用");
         return;
     };
 
     if draft.is_empty() {
-        emit_transient(app, "error", "先说一段或粘贴文字");
+        emit_transient(app, Some(session_id), "error", "先说一段或粘贴文字");
         return;
     }
 
     if !super::text_ai::text_ai_ready(&cfg.text_ai) {
-        emit_transient(app, "error", "请先配置并同意文本 AI");
+        emit_transient(app, Some(session_id), "error", "请先配置并同意文本 AI");
         return;
     }
 
@@ -767,30 +873,29 @@ fn apply_voice_edit(app: &AppHandle, _state: &AppSessionState, cfg: &AppConfig, 
     let scope = match resolve_edit_scope(&text, sel_start, sel_end, instruction) {
         Ok(s) => s,
         Err(err) => {
-            emit_transient(app, "error", map_text_ai_err(&err));
+            emit_transient(app, Some(session_id), "error", map_text_ai_err(&err));
             return;
         }
     };
     let original = text[scope.start..scope.end].to_string();
     if original.trim().is_empty() {
-        emit_transient(app, "error", "没有可修改的内容");
+        emit_transient(app, Some(session_id), "error", "没有可修改的内容");
         return;
     }
 
-    emit_phase(app, "transcribing", "正在修改…");
-    show_overlay(app, true);
+    emit_phase(app, Some(session_id), "transcribing", "正在修改…");
 
     let proposed = match super::text_ai::rewrite_scope(&cfg.text_ai, instruction, &original) {
         Ok(p) => p,
         Err(err) => {
             eprintln!("luozi: text_ai failed: {err}");
-            emit_transient(app, "error", map_text_ai_err(&err));
+            emit_transient(app, Some(session_id), "error", map_text_ai_err(&err));
             return;
         }
     };
 
     if proposed == original {
-        emit_transient(app, "inserted", "无需修改");
+        emit_transient(app, Some(session_id), "inserted", "无需修改");
         return;
     }
 
@@ -801,11 +906,11 @@ fn apply_voice_edit(app: &AppHandle, _state: &AppSessionState, cfg: &AppConfig, 
                     "draft://updated",
                     serde_json::json!({ "reason": "voice_edit" }),
                 );
-                emit_transient(app, "inserted", "已修改");
+                emit_transient(app, Some(session_id), "inserted", "已修改");
             }
             Err(err) => {
                 eprintln!("luozi: apply edit failed: {err}");
-                emit_transient(app, "error", "写入草稿失败");
+                emit_transient(app, Some(session_id), "error", "写入草稿失败");
             }
         },
         EditRisk::High { reasons } => {
@@ -826,7 +931,12 @@ fn apply_voice_edit(app: &AppHandle, _state: &AppSessionState, cfg: &AppConfig, 
                     "proposedPreview": preview,
                 }),
             );
-            emit_transient(app, "confirm", "高风险修改：请在草稿窗确认");
+            emit_transient(
+                app,
+                Some(session_id),
+                "confirm",
+                "高风险修改：请在草稿窗确认",
+            );
         }
     }
 }
@@ -851,7 +961,7 @@ pub fn start_voice_edit_session(
             );
         }
         if draft.is_empty() {
-            emit_transient(app, "error", "先说一段或粘贴文字");
+            emit_transient(app, None, "error", "先说一段或粘贴文字");
             return Err("draft_empty".into());
         }
     }
@@ -874,7 +984,12 @@ pub fn start_continue_session(
     start_session(app, state)
 }
 
-fn apply_delivery(app: &AppHandle, state: &AppSessionState, text: &str) -> DeliveryResult {
+fn apply_delivery(
+    app: &AppHandle,
+    state: &AppSessionState,
+    session_id: u64,
+    text: &str,
+) -> DeliveryResult {
     // M6: when the draft workbench is open, write into the draft instead of external apps.
     if draft_window_is_front(app) {
         if let Some(draft) = app.try_state::<super::DraftStore>() {
@@ -884,13 +999,13 @@ fn apply_delivery(app: &AppHandle, state: &AppSessionState, text: &str) -> Deliv
                         "draft://updated",
                         serde_json::json!({ "reason": "dictation" }),
                     );
-                    emit_transient(app, "inserted", "已写入草稿");
+                    emit_transient(app, Some(session_id), "inserted", "已写入草稿");
                     eprintln!("luozi: delivered into draft workbench");
                     return DeliveryResult::Inserted;
                 }
                 Err(err) => {
                     eprintln!("luozi: draft append failed: {err}");
-                    emit_transient(app, "error", "草稿写入失败");
+                    emit_transient(app, Some(session_id), "error", "草稿写入失败");
                     return DeliveryResult::Failed;
                 }
             }
@@ -972,12 +1087,17 @@ fn apply_delivery(app: &AppHandle, state: &AppSessionState, text: &str) -> Deliv
     let result = match outcome {
         Ok(DeliverOutcome::Inserted) => {
             eprintln!("luozi: delivered insert → {text}");
-            emit_transient(app, "inserted", "已落字");
+            emit_transient(app, Some(session_id), "inserted", "已落字");
             DeliveryResult::Inserted
         }
         Ok(DeliverOutcome::Discard) => {
             eprintln!("luozi: delivered discard");
-            emit_transient(app, "discarded", "安全输入：已丢弃，未写入");
+            emit_transient(
+                app,
+                Some(session_id),
+                "discarded",
+                "安全输入：已丢弃，未写入",
+            );
             DeliveryResult::Inserted
         }
         Ok(DeliverOutcome::Clipboard) | Ok(DeliverOutcome::Error(_)) | Err(_) => {
@@ -988,10 +1108,10 @@ fn apply_delivery(app: &AppHandle, state: &AppSessionState, text: &str) -> Deliv
             std::thread::sleep(std::time::Duration::from_millis(80));
             if spike::focused_field_contains(text) {
                 eprintln!("luozi: verified after CG type → {text}");
-                emit_transient(app, "inserted", "已落字");
+                emit_transient(app, Some(session_id), "inserted", "已落字");
                 DeliveryResult::Inserted
             } else {
-                write_clipboard_with_paste(app, state, text, trusted)
+                write_clipboard_with_paste(app, state, session_id, text, trusted)
             }
         }
     };
@@ -1003,42 +1123,46 @@ fn apply_delivery(app: &AppHandle, state: &AppSessionState, text: &str) -> Deliv
 fn write_clipboard_with_paste(
     app: &AppHandle,
     state: &AppSessionState,
+    session_id: u64,
     text: &str,
     trusted: bool,
 ) -> DeliveryResult {
-    match state.clipboard.lock() {
-        Ok(mut gate) => match gate.write_with_undo(text) {
-            Ok(()) => {
-                restore_source_app(state);
-                let pasted = spike::paste_via_cmd_v().is_ok();
-                std::thread::sleep(std::time::Duration::from_millis(100));
-                let verified = spike::focused_field_contains(text);
-                eprintln!(
-                    "luozi: clipboard written pasted={pasted} trusted={trusted} verified={verified}"
-                );
-                if verified {
-                    emit_transient(app, "inserted", "已落字");
-                    DeliveryResult::Inserted
-                } else if !trusted {
-                    emit_transient(app, "error", "辅助功能未生效：关掉再打开 Luozi 开关");
-                    let _ = std::process::Command::new("open")
-                        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
-                        .spawn();
-                    DeliveryResult::Clipboard
-                } else {
-                    emit_transient(app, "clipboard", "未进输入框，已到剪贴板 · 请 ⌘V");
-                    DeliveryResult::Clipboard
-                }
-            }
-            Err(err) => {
-                emit_transient(app, "error", &err);
-                DeliveryResult::Failed
-            }
-        },
-        Err(_) => {
-            emit_transient(app, "error", "clipboard_lock_failed");
-            DeliveryResult::Failed
-        }
+    let write_result = match state.clipboard.lock() {
+        Ok(mut gate) => gate.write_with_undo(text),
+        Err(_) => Err("clipboard_lock_failed".into()),
+    };
+    if let Err(err) = write_result {
+        emit_transient(app, Some(session_id), "error", &err);
+        return DeliveryResult::Failed;
+    }
+
+    restore_source_app(state);
+    let pasted = spike::paste_via_cmd_v().is_ok();
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    let verified = spike::focused_field_contains(text);
+    eprintln!("luozi: clipboard written pasted={pasted} trusted={trusted} verified={verified}");
+    if verified {
+        emit_transient(app, Some(session_id), "inserted", "已落字");
+        DeliveryResult::Inserted
+    } else if !trusted {
+        emit_transient(
+            app,
+            Some(session_id),
+            "error",
+            "辅助功能未生效：关掉再打开 Luozi 开关",
+        );
+        let _ = std::process::Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+            .spawn();
+        DeliveryResult::Clipboard
+    } else {
+        emit_transient(
+            app,
+            Some(session_id),
+            "clipboard",
+            "未进输入框，已到剪贴板 · 请 ⌘V",
+        );
+        DeliveryResult::Clipboard
     }
 }
 
@@ -1065,14 +1189,27 @@ pub fn is_recording_phase(state: &AppSessionState) -> bool {
 fn fail_transcribe(
     app: &AppHandle,
     state: &AppSessionState,
+    session_id: u64,
     err: String,
 ) -> Result<SessionStatus, String> {
-    let _ = state
+    let canceled = state
         .machine
         .lock()
-        .map(|mut m| m.handle(SessionCommand::Cancel));
+        .ok()
+        .map(|mut machine| {
+            if machine.active_session_id() != Some(session_id) {
+                return false;
+            }
+            machine.handle(SessionCommand::Cancel);
+            true
+        })
+        .unwrap_or(false);
+    if !canceled {
+        eprintln!("luozi: transcribe failure stale for session {session_id}: {err}");
+        return Err(err);
+    }
     disarm_escape(app);
-    emit_transient(app, "error", &user_facing_asr_error(&err));
+    emit_transient(app, Some(session_id), "error", &user_facing_asr_error(&err));
     Err(err)
 }
 
@@ -1115,6 +1252,7 @@ pub fn set_asr_mode(app: &AppHandle, mode: &str) -> Result<AsrMode, String> {
     })?;
     emit_transient(
         app,
+        None,
         "inserted",
         &format!("引擎模式：{}", cfg.asr_mode.label_zh()),
     );
@@ -1128,6 +1266,7 @@ pub fn cycle_asr_mode(app: &AppHandle) -> Result<AsrMode, String> {
     })?;
     emit_transient(
         app,
+        None,
         "inserted",
         &format!("引擎模式：{}", cfg.asr_mode.label_zh()),
     );
@@ -1142,7 +1281,12 @@ pub fn set_cloud_asr_provider(app: &AppHandle, provider_id: &str) -> Result<(), 
     let _ = super::config_store::update(|c| {
         c.cloud_asr = next;
     })?;
-    emit_transient(app, "inserted", &format!("云端 ASR：{}", preset.label_zh));
+    emit_transient(
+        app,
+        None,
+        "inserted",
+        &format!("云端 ASR：{}", preset.label_zh),
+    );
     Ok(())
 }
 
@@ -1162,7 +1306,12 @@ pub fn set_text_ai_provider(app: &AppHandle, provider_id: &str) -> Result<(), St
             }
         }
     }
-    emit_transient(app, "inserted", &format!("文本 AI：{}", preset.label_zh));
+    emit_transient(
+        app,
+        None,
+        "inserted",
+        &format!("文本 AI：{}", preset.label_zh),
+    );
     Ok(())
 }
 
@@ -1223,7 +1372,7 @@ pub fn prompt_text_ai_model(app: &AppHandle) -> Result<(), String> {
         let _ = super::config_store::update(|c| {
             c.text_ai.model = value;
         })?;
-        emit_transient(app, "inserted", "文本 AI 模型已更新");
+        emit_transient(app, None, "inserted", "文本 AI 模型已更新");
         Ok(())
     }
     #[cfg(not(target_os = "macos"))]
@@ -1244,7 +1393,7 @@ pub fn consent_current_cloud(app: &AppHandle) -> Result<(), String> {
         .host()
         .ok_or_else(|| "cloud_protocol_error".to_string())?;
     super::consent::grant(&cfg.cloud_asr.provider_id, &host)?;
-    emit_transient(app, "inserted", &format!("已同意上传到 {host}"));
+    emit_transient(app, None, "inserted", &format!("已同意上传到 {host}"));
     Ok(())
 }
 
@@ -1261,7 +1410,7 @@ pub fn prompt_and_store_asr_key(app: &AppHandle) -> Result<(), String> {
             .unwrap_or("粘贴云端 ASR API Key（仅存本机钥匙串）");
         let key = osascript_prompt(prompt)?;
         super::credentials::set_secret(&cfg.cloud_asr.credential_ref, &key)?;
-        emit_transient(app, "inserted", "ASR Key 已写入钥匙串");
+        emit_transient(app, None, "inserted", "ASR Key 已写入钥匙串");
         Ok(())
     }
     #[cfg(not(target_os = "macos"))]
@@ -1281,7 +1430,7 @@ pub fn prompt_and_store_text_ai_key(app: &AppHandle) -> Result<(), String> {
             .unwrap_or("粘贴文本 AI API Key（仅存本机钥匙串）");
         let key = osascript_prompt(prompt)?;
         super::credentials::set_secret(&cfg.text_ai.credential_ref, &key)?;
-        emit_transient(app, "inserted", "文本 AI Key 已写入钥匙串");
+        emit_transient(app, None, "inserted", "文本 AI Key 已写入钥匙串");
         Ok(())
     }
     #[cfg(not(target_os = "macos"))]
@@ -1298,7 +1447,12 @@ pub fn consent_current_text_ai(app: &AppHandle) -> Result<(), String> {
         .host()
         .ok_or_else(|| "text_ai_protocol_error".to_string())?;
     super::consent::grant(&cfg.text_ai.provider_id, &host)?;
-    emit_transient(app, "inserted", &format!("已同意文本 AI 上传到 {host}"));
+    emit_transient(
+        app,
+        None,
+        "inserted",
+        &format!("已同意文本 AI 上传到 {host}"),
+    );
     Ok(())
 }
 
@@ -1353,7 +1507,7 @@ pub fn start_session_with_token(
     token: TargetToken,
 ) -> Result<SessionStatus, String> {
     if token.is_secure {
-        emit_transient(app, "rejected", "安全输入区域：未开始录音");
+        emit_transient(app, None, "rejected", "安全输入区域：未开始录音");
         return Err("secure_input_rejected".into());
     }
 
@@ -1385,7 +1539,7 @@ pub fn start_session_with_token(
                     .lock()
                     .map(|mut m| m.handle(SessionCommand::Cancel));
                 state.hold_active.store(false, Ordering::SeqCst);
-                emit_transient(app, "error", &err);
+                emit_transient(app, Some(session_id), "error", &err);
                 return Err(err);
             }
 
@@ -1403,7 +1557,12 @@ pub fn start_session_with_token(
                     .map(|mut m| m.handle(SessionCommand::Cancel));
                 let _ = state.source_target.lock().map(|mut g| *g = None);
                 disarm_escape(app);
-                emit_transient(app, "canceled", "已授权麦克风。请再按住说话，松手落字");
+                emit_transient(
+                    app,
+                    Some(session_id),
+                    "canceled",
+                    "已授权麦克风。请再按住说话，松手落字",
+                );
                 return status_from(state, "canceled_after_permission".into());
             }
 
@@ -1427,7 +1586,6 @@ pub fn start_session_with_token(
             );
 
             let _ = state.source_target.lock().map(|mut g| *g = Some(token));
-            show_overlay(app, true);
             arm_escape(app);
             let editing = state
                 .intent
@@ -1436,11 +1594,17 @@ pub fn start_session_with_token(
                 .map(|g| *g == SessionIntent::VoiceEdit)
                 .unwrap_or(false);
             if editing {
-                emit_phase(app, "recording_edit", "说修改要求… · Esc 取消");
+                emit_phase(
+                    app,
+                    Some(session_id),
+                    "recording_edit",
+                    "说修改要求… · Esc 取消",
+                );
             } else {
                 let shortcut = registered_shortcut_label(state);
                 emit_phase(
                     app,
+                    Some(session_id),
                     "recording",
                     &format!("松开 {shortcut} 开始整理 · Esc 取消"),
                 );
@@ -1450,36 +1614,62 @@ pub fn start_session_with_token(
             let app_cap = app.clone();
             std::thread::spawn(move || {
                 let t = capture_source_token(&app_cap);
+                let Some(state) = app_cap.try_state::<AppSessionState>() else {
+                    return;
+                };
+                let same_session = state
+                    .machine
+                    .lock()
+                    .ok()
+                    .and_then(|machine| machine.recording_session_id())
+                    == Some(session_id);
+                if !same_session {
+                    return;
+                }
                 if t.is_secure {
                     // Too late to reject cleanly mid-record; cancel instead.
-                    if let Some(state) = app_cap.try_state::<AppSessionState>() {
-                        let _ = cancel_session(&app_cap, &state);
-                        emit_transient(&app_cap, "rejected", "安全输入区域：已取消");
+                    if !cancel_session_if_current(&state, session_id) {
+                        return;
                     }
+                    disarm_escape(&app_cap);
+                    emit_transient(
+                        &app_cap,
+                        Some(session_id),
+                        "rejected",
+                        "安全输入区域：已取消",
+                    );
                     return;
                 }
                 if t.process_id != 0 {
-                    if let Some(state) = app_cap.try_state::<AppSessionState>() {
-                        let _ = state.source_target.lock().map(|mut g| *g = Some(t.clone()));
-                        let _ = state
-                            .source_pid
-                            .lock()
-                            .map(|mut g| *g = Some(t.process_id as i32));
-                    }
+                    let _ = state.source_target.lock().map(|mut g| *g = Some(t.clone()));
+                    let _ = state
+                        .source_pid
+                        .lock()
+                        .map(|mut g| *g = Some(t.process_id as i32));
                 }
                 // Keep HUD on recording copy even if capture was soft-fail.
-                if let Some(state) = app_cap.try_state::<AppSessionState>() {
-                    if is_recording_phase(&state) {
-                        if editing {
-                            emit_phase(&app_cap, "recording_edit", "说修改要求… · Esc 取消");
-                        } else {
-                            let shortcut = registered_shortcut_label(&state);
-                            emit_phase(
-                                &app_cap,
-                                "recording",
-                                &format!("松开 {shortcut} 开始整理 · Esc 取消"),
-                            );
-                        }
+                let same_session = state
+                    .machine
+                    .lock()
+                    .ok()
+                    .and_then(|machine| machine.recording_session_id())
+                    == Some(session_id);
+                if same_session {
+                    if editing {
+                        emit_phase(
+                            &app_cap,
+                            Some(session_id),
+                            "recording_edit",
+                            "说修改要求… · Esc 取消",
+                        );
+                    } else {
+                        let shortcut = registered_shortcut_label(&state);
+                        emit_phase(
+                            &app_cap,
+                            Some(session_id),
+                            "recording",
+                            &format!("松开 {shortcut} 开始整理 · Esc 取消"),
+                        );
                     }
                 }
             });
@@ -1603,17 +1793,17 @@ pub fn stop_session(app: &AppHandle, state: &AppSessionState) -> Result<SessionS
     };
 
     match effect {
-        SessionEffect::RejectedTooShort { .. } => {
+        SessionEffect::RejectedTooShort { session_id } => {
             eprintln!("luozi: session too short (<300ms)");
             disarm_escape(app);
-            emit_transient(app, "too_short", "时间太短，请按住再松手");
+            emit_transient(app, Some(session_id), "too_short", "时间太短，请按住再松手");
             status_from(state, "too_short".into())
         }
         SessionEffect::BeginTranscribe { session_id } => {
-            emit_phase(app, "transcribing", "落字中");
+            emit_phase(app, Some(session_id), "transcribing", "落字中");
             let language = super::config_store::load().language;
             let Some(capture) = audio else {
-                return fail_transcribe(app, state, "asr_no_audio".into());
+                return fail_transcribe(app, state, session_id, "asr_no_audio".into());
             };
 
             spawn_transcribe_watchdog(app.clone(), session_id);
@@ -1647,12 +1837,12 @@ pub fn cancel_session(app: &AppHandle, state: &AppSessionState) -> Result<Sessio
     let _ = state.source_target.lock().map(|mut g| *g = None);
     disarm_escape(app);
     match effect {
-        SessionEffect::Canceled { .. } => {
-            emit_transient(app, "canceled", "已取消");
+        SessionEffect::Canceled { session_id } => {
+            emit_transient(app, Some(session_id), "canceled", "已取消");
             status_from(state, "canceled".into())
         }
         SessionEffect::RejectedBusy => {
-            show_overlay(app, false);
+            hide_overlay_if_idle(app, state);
             status_from(state, "idle".into())
         }
         other => Err(format!("unexpected_cancel_effect: {other:?}")),
@@ -1665,14 +1855,20 @@ pub fn undo_last(app: &AppHandle, state: &AppSessionState) -> Result<SessionStat
         .lock()
         .map_err(|_| "clipboard_lock_failed")?;
     gate.undo_last()?;
-    let (phase, message) = undo_feedback();
-    emit_transient(app, phase, message);
     drop(gate);
+    let (phase, message) = undo_feedback();
+    emit_transient(app, None, phase, message);
     status_from(state, "undone".into())
 }
 
 fn status_from(state: &AppSessionState, message: String) -> Result<SessionStatus, String> {
-    let machine = state.machine.lock().map_err(|_| "session_lock_failed")?;
+    let (phase, session_id) = {
+        let machine = state.machine.lock().map_err(|_| "session_lock_failed")?;
+        (
+            phase_name(machine.phase()).to_string(),
+            machine.active_session_id(),
+        )
+    };
     let can_undo = state
         .clipboard
         .lock()
@@ -1684,8 +1880,8 @@ fn status_from(state: &AppSessionState, message: String) -> Result<SessionStatus
         .ok()
         .and_then(|g| g.clone());
     Ok(SessionStatus {
-        phase: phase_name(machine.phase()).into(),
-        session_id: machine.active_session_id(),
+        phase,
+        session_id,
         can_undo,
         fake_transcript: false,
         registered_continue,
@@ -1732,7 +1928,53 @@ pub fn session_status(state: State<'_, AppSessionState>) -> Result<SessionStatus
 
 #[cfg(test)]
 mod hud_tests {
-    use super::{transient_duration_ms, undo_feedback, HudPhasePayload};
+    use super::{
+        hud_phase_payload, transient_duration_ms, undo_feedback, HudCommand, HudLifecycle,
+    };
+
+    #[test]
+    fn old_generation_cannot_hide_new_transient() {
+        let lifecycle = HudLifecycle::default();
+        let old_show = lifecycle.request_visibility(true);
+        let new_show = lifecycle.request_visibility(true);
+
+        assert!(lifecycle.expire_transient(old_show.generation).is_none());
+        assert!(lifecycle.command_is_current(new_show));
+    }
+
+    #[test]
+    fn stale_overlay_commands_do_not_match_current_desired_state() {
+        let lifecycle = HudLifecycle::default();
+        let show = lifecycle.request_visibility(true);
+        let stale_hide = HudCommand {
+            generation: show.generation,
+            visible: false,
+        };
+
+        assert!(lifecycle.command_is_current(show));
+        assert!(!lifecycle.command_is_current(stale_hide));
+
+        let hide = lifecycle
+            .expire_transient(show.generation)
+            .expect("current transient should expire");
+        assert!(!lifecycle.command_is_current(show));
+        assert!(lifecycle.command_is_current(hide));
+
+        let replacement_show = lifecycle.request_visibility(true);
+        assert!(!lifecycle.command_is_current(hide));
+        assert!(lifecycle.command_is_current(replacement_show));
+    }
+
+    #[test]
+    fn explicit_hide_invalidates_pending_show_and_timer() {
+        let lifecycle = HudLifecycle::default();
+        let show = lifecycle.request_visibility(true);
+        let hide = lifecycle.request_visibility(false);
+
+        assert!(!lifecycle.command_is_current(show));
+        assert!(lifecycle.command_is_current(hide));
+        assert!(lifecycle.expire_transient(show.generation).is_none());
+    }
 
     #[test]
     fn inserted_feedback_is_brief() {
@@ -1761,12 +2003,8 @@ mod hud_tests {
     }
 
     #[test]
-    fn phase_payload_serializes_session_id_in_camel_case() {
-        let payload = HudPhasePayload {
-            phase: "recording",
-            message: "listening",
-            session_id: Some(42),
-        };
+    fn phase_payload_serializes_explicit_session_id_in_camel_case() {
+        let payload = hud_phase_payload("recording", "listening", Some(42));
 
         assert_eq!(
             serde_json::to_value(payload).expect("serialize HUD phase payload"),
@@ -1774,6 +2012,20 @@ mod hud_tests {
                 "phase": "recording",
                 "message": "listening",
                 "sessionId": 42,
+            }),
+        );
+    }
+
+    #[test]
+    fn phase_payload_serializes_explicit_null_session_id() {
+        let payload = hud_phase_payload("warn", "model", None);
+
+        assert_eq!(
+            serde_json::to_value(payload).expect("serialize HUD phase payload"),
+            serde_json::json!({
+                "phase": "warn",
+                "message": "model",
+                "sessionId": null,
             }),
         );
     }

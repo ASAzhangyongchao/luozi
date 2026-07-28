@@ -90,10 +90,17 @@ function showSection(id: string) {
     el.hidden = el.id !== `section-${id}`;
   });
   document.querySelectorAll<HTMLButtonElement>(".nav-item").forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.section === id);
+    const isActive = btn.dataset.section === id;
+    btn.classList.toggle("active", isActive);
+    if (isActive) {
+      btn.setAttribute("aria-current", "page");
+    } else {
+      btn.removeAttribute("aria-current");
+    }
   });
-  syncPermissionsPoll(id === "permissions");
-  if (id === "permissions") void refresh();
+  const isPrivacy = id === "privacy";
+  syncPermissionsPoll(isPrivacy);
+  if (isPrivacy) void refresh();
 }
 
 function syncPermissionsPoll(active: boolean) {
@@ -152,8 +159,16 @@ function applySnapshot(s: SettingsSnapshot) {
   if (modelStatus) modelStatus.textContent = s.modelStatus;
   const modelBadge = document.querySelector("#modelBadge");
   if (modelBadge) {
-    modelBadge.textContent = s.modelReady ? "就绪" : "未就绪";
-    modelBadge.className = `badge ${s.modelReady ? "ok" : "warn"}`;
+    if (s.modelReady) {
+      modelBadge.textContent = "已就绪";
+      modelBadge.className = "badge ok";
+    } else if (s.modelStatus.includes("需重新下载")) {
+      modelBadge.textContent = "需重下";
+      modelBadge.className = "badge warn";
+    } else {
+      modelBadge.textContent = "未安装";
+      modelBadge.className = "badge";
+    }
   }
 
   const cloud = document.querySelector("#cloudAsrStatus");
@@ -182,6 +197,17 @@ function applySnapshot(s: SettingsSnapshot) {
     textAi.textContent = s.textAiReady
       ? `已就绪 · ${s.textAiProviderLabel} · ${s.textAiModel}`
       : `未就绪 · ${s.textAiProviderLabel} · 需 Key + 同意（${s.textAiHost || "—"}）`;
+  }
+  const textAiSummary = document.querySelector("#textAiSummary");
+  if (textAiSummary) {
+    textAiSummary.textContent = s.textAiReady
+      ? `AI 修改已就绪 · ${s.textAiProviderLabel}`
+      : "基础转写可直接使用；AI 修改需在高级设置中授权。";
+  }
+  const textAiSummaryBadge = document.querySelector("#textAiSummaryBadge");
+  if (textAiSummaryBadge) {
+    textAiSummaryBadge.textContent = s.textAiReady ? "AI 已就绪" : "基础";
+    textAiSummaryBadge.className = `badge ${s.textAiReady ? "ok" : ""}`.trim();
   }
   setQuietButton(
     document.querySelector("#btnTextAiKey"),

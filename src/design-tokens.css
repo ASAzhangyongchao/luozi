@@ -9,6 +9,7 @@
   --brand-mint: #62d5c7;
   --brand-violet: #8b92ff;
   --state-success: #50c59f;
+  --state-success-foreground: #1a7f4b;
   --state-error: #f1786d;
   --state-warning: #d99b4d;
   --shadow-float: 0 12px 36px color-mix(in srgb, #163434 16%, transparent);
@@ -32,6 +33,7 @@
     --surface-solid: #253333;
     --text-ink: #eef8f5;
     --text-muted: #9db2b0;
+    --state-success-foreground: #75d8b5;
     --line-soft: color-mix(in srgb, #eef8f5 14%, transparent);
     --shadow-float: 0 16px 42px color-mix(in srgb, #000 42%, transparent);
   }

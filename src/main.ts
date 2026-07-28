@@ -75,6 +75,19 @@ async function showDraftView() {
   await getCurrentWindow().setTitle("落字 · 语音草稿");
 }
 
+function openSettingsModal(section = "general") {
+  const dialog = document.querySelector<HTMLDialogElement>("#settingsDialog");
+  const frame = document.querySelector<HTMLIFrameElement>("#settingsFrame");
+  if (!dialog || !frame) return;
+  frame.src = `./settings.html?embed=1&section=${encodeURIComponent(section)}`;
+  if (!dialog.open) dialog.showModal();
+}
+
+function closeSettingsModal() {
+  const dialog = document.querySelector<HTMLDialogElement>("#settingsDialog");
+  dialog?.close();
+}
+
 async function refreshHistory() {
   const items = await invoke<HistoryItem[]>("history_list");
   const list = historyList();
@@ -278,12 +291,15 @@ async function main() {
     }
   });
 
-  document.querySelector("#btnRailSettings")?.addEventListener("click", async () => {
-    try {
-      await invoke("open_settings_window", { section: "general" });
-    } catch (err) {
-      statusEl().textContent = `打开设置失败：${err}`;
-    }
+  document.querySelector("#btnRailSettings")?.addEventListener("click", () => {
+    openSettingsModal("general");
+  });
+  document.querySelector("#btnCloseSettings")?.addEventListener("click", () => {
+    closeSettingsModal();
+  });
+  document.querySelector("#settingsDialog")?.addEventListener("close", () => {
+    const frame = document.querySelector<HTMLIFrameElement>("#settingsFrame");
+    if (frame) frame.src = "about:blank";
   });
   document.querySelector("#btnRailGuide")?.addEventListener("click", async () => {
     try {

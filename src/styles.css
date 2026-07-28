@@ -1,5 +1,6 @@
 :root {
   /* Falling Cursor tokens — truth source: docs brand §4 + assets/brand */
+  color-scheme: light;
   --night-teal: #0b3034;
   --aurora-cyan: #42d9d3;
   --ice-white: #f4fbfa;
@@ -277,8 +278,16 @@ code {
 }
 
 .rail-icon {
-  font-size: 15px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
   line-height: 1;
+}
+
+.rail-icon svg {
+  display: block;
 }
 
 .rail-label {
@@ -451,6 +460,104 @@ code {
 
 .history-item-actions .primary-ghost {
   border-color: color-mix(in srgb, var(--aurora-cyan) 40%, transparent);
+}
+
+.history-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 8px;
+  padding: 48px 24px;
+  border: 1px dashed var(--line);
+  border-radius: 14px;
+  background: color-mix(in srgb, #ffffff 70%, var(--ice-white));
+  color: var(--content-muted);
+}
+
+.history-empty-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  color: var(--night-teal);
+  background: color-mix(in srgb, var(--aurora-cyan) 16%, transparent);
+  margin-bottom: 4px;
+}
+
+.history-empty-title {
+  margin: 0;
+  font-size: 0.98rem;
+  font-weight: 600;
+  color: var(--night-teal);
+}
+
+.history-empty-desc {
+  margin: 0;
+  max-width: 28rem;
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+
+.settings-dialog {
+  width: min(820px, calc(100vw - 48px));
+  height: min(620px, calc(100vh - 48px));
+  max-width: none;
+  max-height: none;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--content-bg);
+  color: var(--content-ink);
+  box-shadow: 0 24px 64px color-mix(in srgb, var(--night-teal) 22%, transparent);
+  overflow: hidden;
+}
+
+.settings-dialog::backdrop {
+  background: color-mix(in srgb, var(--night-teal) 42%, transparent);
+  backdrop-filter: blur(2px);
+}
+
+.settings-dialog-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-raised);
+}
+
+.settings-dialog-bar strong {
+  font-size: 0.95rem;
+  color: var(--night-teal);
+}
+
+.settings-dialog-close {
+  appearance: none;
+  border: 1px solid var(--control-border);
+  background: var(--control-glass);
+  color: var(--night-teal);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.settings-dialog-close:hover {
+  border-color: color-mix(in srgb, var(--aurora-cyan) 45%, transparent);
+}
+
+.settings-frame {
+  display: block;
+  width: 100%;
+  height: calc(100% - 45px);
+  border: 0;
+  background: var(--content-bg);
 }
 
 .spike-panel {

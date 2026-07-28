@@ -258,3 +258,53 @@ ul.plain {
   border: 1px solid var(--line);
   background: #fff;
 }
+
+.coming-soon {
+  margin-top: 18px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+  overflow: hidden;
+}
+
+.coming-soon > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 12px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  user-select: none;
+}
+
+.coming-soon > summary::-webkit-details-marker {
+  display: none;
+}
+
+.coming-soon > summary::before {
+  content: "▸ ";
+  color: var(--accent);
+}
+
+.coming-soon[open] > summary::before {
+  content: "▾ ";
+}
+
+.coming-soon .row {
+  margin: 0 14px;
+  padding: 12px 0;
+}
+
+.coming-soon .row:last-child {
+  border-bottom: 0;
+}
+
+body.settings-embed {
+  min-height: 100%;
+  background: var(--bg);
+}
+
+body.settings-embed .settings-shell {
+  min-height: 100%;
+  height: 100%;
+}

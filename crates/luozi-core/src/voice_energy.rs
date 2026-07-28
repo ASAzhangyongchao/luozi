@@ -33,7 +33,11 @@ pub fn measure_levels(samples: &[f32]) -> (f32, f32) {
     }
 
     let (sum_of_squares, peak) = samples.iter().fold((0.0_f32, 0.0_f32), |acc, sample| {
-        let sample = sample.clamp(-1.0, 1.0);
+        let sample = if sample.is_nan() {
+            0.0
+        } else {
+            sample.clamp(-1.0, 1.0)
+        };
         (acc.0 + sample * sample, acc.1.max(sample.abs()))
     });
 
@@ -100,7 +104,7 @@ mod tests {
     }
 
     #[test]
-    fn throttle_emits_no_more_than_twenty_five_times_per_second() {
+    fn throttle_enforces_40ms_minimum_interval() {
         let mut throttle = EnergyThrottle::new(40);
 
         assert!(throttle.should_emit(0));
@@ -111,10 +115,36 @@ mod tests {
     }
 
     #[test]
+    fn throttle_does_not_emit_when_clock_rolls_back() {
+        let mut throttle = EnergyThrottle::new(40);
+
+        assert!(throttle.should_emit(100));
+        assert!(!throttle.should_emit(90));
+        assert!(throttle.should_emit(140));
+    }
+
+    #[test]
+    fn measure_levels_returns_zero_for_empty_samples() {
+        assert_eq!(measure_levels(&[]), (0.0, 0.0));
+    }
+
+    #[test]
     fn measure_levels_clamps_samples_before_calculating_rms_and_peak() {
         let (rms, peak) = measure_levels(&[1.0, -1.0, 0.0, 2.0]);
 
         assert!((rms - (3.0_f32 / 4.0).sqrt()).abs() < 0.000_001);
         assert!((peak - 1.0).abs() < 0.000_001);
+    }
+
+    #[test]
+    fn measure_levels_treats_nan_as_silence_and_keeps_output_finite() {
+        let (rms, peak) = measure_levels(&[f32::NAN, f32::INFINITY, f32::NEG_INFINITY]);
+
+        assert!(rms.is_finite());
+        assert!(peak.is_finite());
+        assert!((0.0..=1.0).contains(&rms));
+        assert!((0.0..=1.0).contains(&peak));
+        assert!((rms - (2.0_f32 / 3.0).sqrt()).abs() < 0.000_001);
+        assert_eq!(peak, 1.0);
     }
 }

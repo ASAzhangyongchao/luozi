@@ -123,4 +123,58 @@ describe("HUD state reducer", () => {
     });
     expect(nonFinite.energy).toBe(0);
   });
+
+  it("advances the phase revision for consecutive feedback of the same kind", () => {
+    const inserted = reduceHudState(initialHudState, {
+      phase: "inserted",
+      message: "已落字",
+      sessionId: 12,
+    });
+    const undone = reduceHudState(inserted, {
+      phase: "undone",
+      message: "已撤销",
+      sessionId: 12,
+    });
+
+    expect(undone.kind).toBe("success");
+    expect(undone.phaseRevision).toBe(inserted.phaseRevision + 1);
+  });
+
+  it("keeps the phase revision unchanged for listening energy", () => {
+    const listening = reduceHudState(initialHudState, {
+      phase: "recording",
+      message: "listening",
+      sessionId: 13,
+    });
+    const energized = reduceHudState(listening, {
+      sessionId: 13,
+      level: 0.64,
+    });
+
+    expect(energized.energy).toBe(0.64);
+    expect(energized.phaseRevision).toBe(listening.phaseRevision);
+  });
+
+  it("maps confirmation to an amber caution state", () => {
+    const confirmation = reduceHudState(initialHudState, {
+      phase: "confirm",
+      message: "再次按快捷键确认上传",
+      sessionId: 14,
+    });
+
+    expect(confirmation.kind).toBe("confirmation");
+    expect(confirmation.title).toBe("需要确认后继续");
+    expect(confirmation.detail).toBe("再次按快捷键确认上传");
+  });
+
+  it("keeps recording edit in the listening state", () => {
+    const editing = reduceHudState(initialHudState, {
+      phase: "recording_edit",
+      message: "正在听修改要求",
+      sessionId: 15,
+    });
+
+    expect(editing.kind).toBe("listening");
+    expect(editing.title).toBe("正在听修改要求");
+  });
 });

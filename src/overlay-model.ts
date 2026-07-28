@@ -4,6 +4,7 @@ export type HudKind =
   | "processing"
   | "success"
   | "clipboard"
+  | "confirmation"
   | "permission"
   | "error";
 
@@ -26,6 +27,7 @@ export type HudState = {
   detail: string;
   sessionId: number | null;
   energy: number;
+  phaseRevision: number;
 };
 
 export const initialHudState: HudState = {
@@ -34,6 +36,7 @@ export const initialHudState: HudState = {
   detail: "",
   sessionId: null,
   energy: 0,
+  phaseRevision: 0,
 };
 
 export function reduceHudState(current: HudState, event: HudEvent): HudState {
@@ -57,6 +60,7 @@ export function reduceHudState(current: HudState, event: HudEvent): HudState {
   }
 
   const sessionId = event.sessionId ?? current.sessionId;
+  const phaseRevision = current.phaseRevision + 1;
   switch (event.phase) {
     case "recording":
     case "recording_edit":
@@ -66,6 +70,7 @@ export function reduceHudState(current: HudState, event: HudEvent): HudState {
         detail: event.message,
         sessionId,
         energy: 0,
+        phaseRevision,
       };
     case "transcribing":
     case "delivering":
@@ -75,6 +80,7 @@ export function reduceHudState(current: HudState, event: HudEvent): HudState {
         detail: "已经停止录音，正在准备写入",
         sessionId,
         energy: 0,
+        phaseRevision,
       };
     case "inserted":
     case "undone":
@@ -84,6 +90,7 @@ export function reduceHudState(current: HudState, event: HudEvent): HudState {
         detail: event.message,
         sessionId,
         energy: 0,
+        phaseRevision,
       };
     case "clipboard":
       return {
@@ -92,6 +99,16 @@ export function reduceHudState(current: HudState, event: HudEvent): HudState {
         detail: event.message,
         sessionId,
         energy: 0,
+        phaseRevision,
+      };
+    case "confirm":
+      return {
+        kind: "confirmation",
+        title: "需要确认后继续",
+        detail: event.message,
+        sessionId,
+        energy: 0,
+        phaseRevision,
       };
     case "error": {
       const needsPermission =
@@ -102,6 +119,7 @@ export function reduceHudState(current: HudState, event: HudEvent): HudState {
         detail: event.message,
         sessionId,
         energy: 0,
+        phaseRevision,
       };
     }
     case "rejected":
@@ -114,6 +132,7 @@ export function reduceHudState(current: HudState, event: HudEvent): HudState {
         detail: event.message,
         sessionId,
         energy: 0,
+        phaseRevision,
       };
     case "canceled":
       return {
@@ -122,6 +141,7 @@ export function reduceHudState(current: HudState, event: HudEvent): HudState {
         detail: event.message,
         sessionId,
         energy: 0,
+        phaseRevision,
       };
     default:
       return {
@@ -130,6 +150,7 @@ export function reduceHudState(current: HudState, event: HudEvent): HudState {
         detail: "",
         sessionId,
         energy: 0,
+        phaseRevision,
       };
   }
 }

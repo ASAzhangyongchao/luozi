@@ -14,6 +14,7 @@ const title = document.querySelector<HTMLElement>(".title")!;
 const detail = document.querySelector<HTMLElement>(".detail")!;
 
 let state = initialHudState;
+let renderedPhaseRevision = -1;
 avatar.innerHTML = avatarSvg;
 
 function render() {
@@ -31,6 +32,13 @@ function render() {
     "--orbit-back-opacity",
     (0.18 + energy * 0.46).toFixed(3),
   );
+
+  if (state.phaseRevision !== renderedPhaseRevision) {
+    root.classList.remove("phase-enter");
+    void root.offsetWidth;
+    root.classList.add("phase-enter");
+    renderedPhaseRevision = state.phaseRevision;
+  }
 }
 
 void listen<HudPhaseEvent>("session://phase", (event) => {

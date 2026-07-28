@@ -110,6 +110,9 @@ body {
 
 .overlay[data-state="processing"] .orbit {
   stroke: var(--brand-violet);
+}
+
+.overlay.phase-enter[data-state="processing"] .orbit {
   animation: phase-shift var(--motion-state) ease-out 1;
 }
 
@@ -121,6 +124,10 @@ body {
 .overlay[data-state="clipboard"] .orbit {
   stroke: var(--state-success);
   stroke-dasharray: 0.82 1;
+}
+
+.overlay.phase-enter[data-state="success"] .orbit,
+.overlay.phase-enter[data-state="clipboard"] .orbit {
   animation: orbit-close var(--motion-state) ease-out 1;
 }
 
@@ -131,6 +138,15 @@ body {
 
 .overlay[data-state="success"] .eye {
   transform: scaleY(0.45);
+}
+
+.overlay[data-state="confirmation"] .orbit {
+  opacity: 0.48;
+  stroke: var(--state-warning);
+}
+
+.overlay[data-state="confirmation"] .orbit-node {
+  fill: var(--state-warning);
 }
 
 .overlay[data-state="error"] .orbit,

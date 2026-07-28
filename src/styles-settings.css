@@ -129,7 +129,7 @@ body.settings-embed .settings-shell,
   margin-top: 14px;
 }
 
-.settings-shell button,
+.settings-shell .settings-main button,
 .guide-footer button {
   appearance: none;
   border: 1px solid color-mix(in srgb, var(--night-teal) 14%, transparent);
@@ -141,12 +141,12 @@ body.settings-embed .settings-shell,
   cursor: pointer;
 }
 
-.settings-shell button:hover:not(:disabled),
+.settings-shell .settings-main button:hover:not(:disabled),
 .guide-footer button:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
 }
 
-.settings-shell button:disabled {
+.settings-shell .settings-main button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }

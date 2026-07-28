@@ -212,6 +212,22 @@ fn commit_source_pid_if_current(
     true
 }
 
+fn with_recording_session_if_current(
+    state: &AppSessionState,
+    session_id: u64,
+    callback: impl FnOnce(),
+) -> bool {
+    let Ok(machine) = state.machine.lock() else {
+        return false;
+    };
+    if machine.recording_session_id() != Some(session_id) {
+        return false;
+    }
+    callback();
+    drop(machine);
+    true
+}
+
 fn forward_energy_if_active(
     gate: &EnergySessionGate,
     session_id: u64,
@@ -417,6 +433,32 @@ fn registered_shortcut_label(state: &AppSessionState) -> String {
         .ok()
         .and_then(|value| value.clone())
         .unwrap_or_else(|| super::config_store::load().continue_speaking_shortcut)
+}
+
+fn emit_recording_phase_if_current(
+    app: &AppHandle,
+    state: &AppSessionState,
+    session_id: u64,
+    editing: bool,
+) -> bool {
+    with_recording_session_if_current(state, session_id, || {
+        if editing {
+            emit_phase(
+                app,
+                Some(session_id),
+                "recording_edit",
+                "说修改要求… · Esc 取消",
+            );
+        } else {
+            let shortcut = registered_shortcut_label(state);
+            emit_phase(
+                app,
+                Some(session_id),
+                "recording",
+                &format!("松开 {shortcut} 开始整理 · Esc 取消"),
+            );
+        }
+    })
 }
 
 fn touch_asr_used(state: &AppSessionState) {
@@ -1630,21 +1672,8 @@ pub fn start_session_with_token(
                 .ok()
                 .map(|g| *g == SessionIntent::VoiceEdit)
                 .unwrap_or(false);
-            if editing {
-                emit_phase(
-                    app,
-                    Some(session_id),
-                    "recording_edit",
-                    "说修改要求… · Esc 取消",
-                );
-            } else {
-                let shortcut = registered_shortcut_label(state);
-                emit_phase(
-                    app,
-                    Some(session_id),
-                    "recording",
-                    &format!("松开 {shortcut} 开始整理 · Esc 取消"),
-                );
+            if !emit_recording_phase_if_current(app, state, session_id, editing) {
+                return status_from(state, "canceled_before_recording_phase".into());
             }
 
             // Best-effort focus capture in background (never blocks start).
@@ -1672,30 +1701,7 @@ pub fn start_session_with_token(
                     return;
                 }
                 // Keep HUD on recording copy even if capture was soft-fail.
-                let same_session = state
-                    .machine
-                    .lock()
-                    .ok()
-                    .and_then(|machine| machine.recording_session_id())
-                    == Some(session_id);
-                if same_session {
-                    if editing {
-                        emit_phase(
-                            &app_cap,
-                            Some(session_id),
-                            "recording_edit",
-                            "说修改要求… · Esc 取消",
-                        );
-                    } else {
-                        let shortcut = registered_shortcut_label(&state);
-                        emit_phase(
-                            &app_cap,
-                            Some(session_id),
-                            "recording",
-                            &format!("松开 {shortcut} 开始整理 · Esc 取消"),
-                        );
-                    }
-                }
+                let _ = emit_recording_phase_if_current(&app_cap, &state, session_id, editing);
             });
 
             // Auto-stop at max duration.
@@ -2044,8 +2050,8 @@ mod hud_tests {
 #[cfg(test)]
 mod session_resource_tests {
     use super::{
-        cancel_session_if_current, commit_capture_if_current, dummy_token, AppSessionState,
-        SessionCommand, SessionEffect,
+        cancel_session_if_current, commit_capture_if_current, dummy_token,
+        with_recording_session_if_current, AppSessionState, SessionCommand, SessionEffect,
     };
     use std::sync::atomic::Ordering;
 
@@ -2145,6 +2151,36 @@ mod session_resource_tests {
             Some(303),
         );
         assert_eq!(*state.source_pid.lock().expect("pid lock"), Some(303));
+    }
+
+    #[test]
+    fn stale_session_does_not_run_guarded_recording_callback() {
+        let state = AppSessionState::default();
+        let old_session_id = begin_session(&state);
+        assert!(cancel_session_if_current(&state, old_session_id));
+        let _new_session_id = begin_session(&state);
+        let mut called = false;
+
+        assert!(!with_recording_session_if_current(
+            &state,
+            old_session_id,
+            || called = true,
+        ));
+        assert!(!called);
+    }
+
+    #[test]
+    fn current_session_runs_guarded_recording_callback() {
+        let state = AppSessionState::default();
+        let session_id = begin_session(&state);
+        let mut called = false;
+
+        assert!(with_recording_session_if_current(
+            &state,
+            session_id,
+            || called = true,
+        ));
+        assert!(called);
     }
 }
 

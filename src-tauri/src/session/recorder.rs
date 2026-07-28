@@ -5,9 +5,84 @@ use std::time::Instant;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, Stream, StreamConfig};
+use luozi_core::{EnergyThrottle, VoiceEnergyMeter};
 
 /// Spec ceiling for a single utterance (seconds → ms).
 pub const MAX_RECORDING_MS: u64 = 30_000;
+
+pub type EnergySink = Arc<dyn Fn(f32) + Send + Sync + 'static>;
+
+#[derive(Clone)]
+struct EnergyReporter {
+    state: Arc<Mutex<EnergyReporterState>>,
+    started: Instant,
+    sink: EnergySink,
+}
+
+struct EnergyReporterState {
+    meter: VoiceEnergyMeter,
+    throttle: EnergyThrottle,
+}
+
+impl EnergyReporter {
+    fn new(sink: EnergySink) -> Self {
+        Self {
+            state: Arc::new(Mutex::new(EnergyReporterState {
+                meter: VoiceEnergyMeter::default(),
+                throttle: EnergyThrottle::new(40),
+            })),
+            started: Instant::now(),
+            sink,
+        }
+    }
+
+    fn observe_levels(&self, rms: f32, peak: f32) {
+        let now_ms = self.started.elapsed().as_millis() as u64;
+        let level = {
+            let Ok(mut state) = self.state.lock() else {
+                return;
+            };
+            let level = state.meter.observe_levels(rms, peak);
+            state.throttle.should_emit(now_ms).then_some(level)
+        };
+
+        if let Some(level) = level {
+            (self.sink)(level);
+        }
+    }
+}
+
+fn append_normalized<I>(buffer: &Arc<Mutex<Vec<f32>>>, reporter: &EnergyReporter, samples: I)
+where
+    I: IntoIterator<Item = f32>,
+{
+    let Ok(mut output) = buffer.lock() else {
+        return;
+    };
+    let mut count = 0_usize;
+    let mut sum_squares = 0.0_f32;
+    let mut peak = 0.0_f32;
+
+    for sample in samples {
+        let value = if sample.is_nan() {
+            0.0
+        } else {
+            sample.clamp(-1.0, 1.0)
+        };
+        output.push(value);
+        count += 1;
+        sum_squares += value * value;
+        peak = peak.max(value.abs());
+    }
+    drop(output);
+
+    let rms = if count == 0 {
+        0.0
+    } else {
+        (sum_squares / count as f32).sqrt()
+    };
+    reporter.observe_levels(rms, peak);
+}
 
 #[derive(Clone, Debug)]
 #[allow(dead_code)] // retained for M3 ASR handoff
@@ -51,7 +126,7 @@ impl SessionRecorder {
             .unwrap_or(0)
     }
 
-    pub fn start(&mut self) -> Result<(), String> {
+    pub fn start(&mut self, energy_sink: EnergySink) -> Result<(), String> {
         if self.active.is_some() {
             return Err("recorder_busy".into());
         }
@@ -68,6 +143,7 @@ impl SessionRecorder {
 
         let samples: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
         let err: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let reporter = EnergyReporter::new(energy_sink);
 
         let stream = build_stream(
             &device,
@@ -75,6 +151,7 @@ impl SessionRecorder {
             sample_format,
             samples.clone(),
             err.clone(),
+            reporter,
         )?;
         stream.play().map_err(|e| map_err_string(e.to_string()))?;
 
@@ -136,6 +213,7 @@ fn build_stream(
     sample_format: SampleFormat,
     samples: Arc<Mutex<Vec<f32>>>,
     err: Arc<Mutex<Option<String>>>,
+    reporter: EnergyReporter,
 ) -> Result<Stream, String> {
     let err_flag = err.clone();
     let err_cb = move |e| {
@@ -147,12 +225,11 @@ fn build_stream(
     let stream = match sample_format {
         SampleFormat::F32 => {
             let samples_cb = samples;
+            let reporter_cb = reporter;
             device.build_input_stream(
                 config.clone(),
                 move |data: &[f32], _| {
-                    if let Ok(mut buf) = samples_cb.lock() {
-                        buf.extend_from_slice(data);
-                    }
+                    append_normalized(&samples_cb, &reporter_cb, data.iter().copied());
                 },
                 err_cb,
                 None,
@@ -160,12 +237,15 @@ fn build_stream(
         }
         SampleFormat::I16 => {
             let samples_cb = samples;
+            let reporter_cb = reporter;
             device.build_input_stream(
                 config.clone(),
                 move |data: &[i16], _| {
-                    if let Ok(mut buf) = samples_cb.lock() {
-                        buf.extend(data.iter().map(|s| *s as f32 / i16::MAX as f32));
-                    }
+                    append_normalized(
+                        &samples_cb,
+                        &reporter_cb,
+                        data.iter().map(|sample| *sample as f32 / i16::MAX as f32),
+                    );
                 },
                 err_cb,
                 None,
@@ -173,12 +253,15 @@ fn build_stream(
         }
         SampleFormat::I32 => {
             let samples_cb = samples;
+            let reporter_cb = reporter;
             device.build_input_stream(
                 config.clone(),
                 move |data: &[i32], _| {
-                    if let Ok(mut buf) = samples_cb.lock() {
-                        buf.extend(data.iter().map(|s| *s as f32 / i32::MAX as f32));
-                    }
+                    append_normalized(
+                        &samples_cb,
+                        &reporter_cb,
+                        data.iter().map(|sample| *sample as f32 / i32::MAX as f32),
+                    );
                 },
                 err_cb,
                 None,
@@ -186,15 +269,16 @@ fn build_stream(
         }
         SampleFormat::U16 => {
             let samples_cb = samples;
+            let reporter_cb = reporter;
             device.build_input_stream(
                 config.clone(),
                 move |data: &[u16], _| {
-                    if let Ok(mut buf) = samples_cb.lock() {
-                        buf.extend(
-                            data.iter()
-                                .map(|s| (*s as f32 / u16::MAX as f32) * 2.0 - 1.0),
-                        );
-                    }
+                    append_normalized(
+                        &samples_cb,
+                        &reporter_cb,
+                        data.iter()
+                            .map(|sample| (*sample as f32 / u16::MAX as f32) * 2.0 - 1.0),
+                    );
                 },
                 err_cb,
                 None,
@@ -218,5 +302,71 @@ fn map_err_string(msg_raw: String) -> String {
         format!("device_disconnected: {msg_raw}")
     } else {
         format!("stream_failed: {msg_raw}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{append_normalized, EnergyReporter, EnergySink};
+    use std::sync::{Arc, Mutex};
+
+    fn collecting_reporter() -> (EnergyReporter, Arc<Mutex<Vec<f32>>>) {
+        let levels = Arc::new(Mutex::new(Vec::new()));
+        let levels_for_sink = levels.clone();
+        let sink: EnergySink = Arc::new(move |level| {
+            levels_for_sink
+                .lock()
+                .expect("level collector lock")
+                .push(level);
+        });
+        (EnergyReporter::new(sink), levels)
+    }
+
+    #[test]
+    fn append_normalized_writes_clamped_samples_and_reports_finite_level() {
+        let buffer = Arc::new(Mutex::new(Vec::new()));
+        let (reporter, levels) = collecting_reporter();
+
+        append_normalized(&buffer, &reporter, [-2.0, -0.5, 0.5, 2.0]);
+
+        assert_eq!(
+            *buffer.lock().expect("sample buffer lock"),
+            vec![-1.0, -0.5, 0.5, 1.0]
+        );
+        let levels = levels.lock().expect("level collector lock");
+        assert_eq!(levels.len(), 1);
+        assert!(levels[0].is_finite());
+        assert!((0.0..=1.0).contains(&levels[0]));
+    }
+
+    #[test]
+    fn energy_reporter_throttles_consecutive_observations_within_40ms() {
+        let (reporter, levels) = collecting_reporter();
+
+        reporter.observe_levels(0.25, 0.5);
+        reporter.observe_levels(0.5, 0.75);
+
+        assert_eq!(levels.lock().expect("level collector lock").len(), 1);
+    }
+
+    #[test]
+    fn append_normalized_treats_nan_as_silence_without_poisoning_output() {
+        let buffer = Arc::new(Mutex::new(Vec::new()));
+        let (reporter, levels) = collecting_reporter();
+
+        append_normalized(
+            &buffer,
+            &reporter,
+            [f32::NAN, f32::INFINITY, f32::NEG_INFINITY],
+        );
+
+        assert_eq!(
+            *buffer.lock().expect("sample buffer lock"),
+            vec![0.0, 1.0, -1.0]
+        );
+        let levels = levels.lock().expect("level collector lock");
+        assert_eq!(levels.len(), 1);
+        assert!(levels[0].is_finite());
+        assert!((0.0..=1.0).contains(&levels[0]));
     }
 }

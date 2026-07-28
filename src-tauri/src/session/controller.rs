@@ -1,7 +1,7 @@
 //! App-owned session controller: machine + recorder + delivery.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use luozi_core::{
@@ -16,7 +16,7 @@ use crate::spike::{self, TargetToken, ValidationState};
 
 use super::asr::{self, AsrEngine};
 use super::clipboard::ClipboardGate;
-use super::recorder::{SessionRecorder, MAX_RECORDING_MS};
+use super::recorder::{EnergySink, SessionRecorder, MAX_RECORDING_MS};
 
 /// Kept for docs/tests that mention the M2 placeholder string.
 #[allow(dead_code)]
@@ -1200,7 +1200,8 @@ pub fn accessibility_trusted_for_tray() -> bool {
 pub fn warmup_microphone_async() {
     std::thread::spawn(|| {
         let mut rec = SessionRecorder::new();
-        match rec.start() {
+        let energy_sink: EnergySink = Arc::new(|_| {});
+        match rec.start(energy_sink) {
             Ok(()) => {
                 std::thread::sleep(std::time::Duration::from_millis(120));
                 match rec.stop() {
@@ -1245,13 +1246,24 @@ pub fn start_session_with_token(
                 .lock()
                 .map(|mut g| *g = spike::current_frontmost_pid());
 
+            let app_for_energy = app.clone();
+            let energy_sink: EnergySink = Arc::new(move |level| {
+                let _ = app_for_energy.emit(
+                    "session://energy",
+                    serde_json::json!({
+                        "sessionId": session_id,
+                        "level": level,
+                    }),
+                );
+            });
+
             // Mic open can block on first-run TCC. Do not leave「听写中」if the user
             // already released during that dialog (hold_active cleared on Released).
             let start_result = state
                 .recorder
                 .lock()
                 .map_err(|_| "recorder_lock_failed".to_string())?
-                .start();
+                .start(energy_sink);
             if let Err(err) = start_result {
                 let _ = state
                     .machine

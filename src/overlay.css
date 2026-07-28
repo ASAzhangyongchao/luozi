@@ -5,7 +5,7 @@
   --amber: #e8a54b;
   --risk-red: #e85d5d;
   --electric-blue: #6c8eff;
-  color: var(--night-teal);
+  color: var(--ice-white);
   font-family:
     "PingFang SC",
     "Hiragino Sans GB",
@@ -25,44 +25,58 @@ body {
   -webkit-user-select: none;
 }
 
-/* Pill sits inside a clear window — corners are transparent, not white. */
+/* Compact Typeless-like pill — fills the small overlay window. */
 .overlay {
   box-sizing: border-box;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  justify-content: center;
+  gap: 10px;
   width: 100%;
   height: 100%;
-  padding: 0 14px;
-  border: 1px solid color-mix(in srgb, var(--ice-white) 20%, transparent);
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, #ffffff 14%, transparent);
   border-radius: 999px;
-  background: var(--night-teal);
+  background: color-mix(in srgb, var(--night-teal) 92%, #000);
   color: var(--ice-white);
-  font-weight: 600;
-  font-size: 0.95rem;
-  letter-spacing: 0.02em;
-  box-shadow: 0 8px 24px color-mix(in srgb, #000 28%, transparent);
+  font-weight: 550;
+  font-size: 0.82rem;
+  letter-spacing: 0.01em;
+  box-shadow:
+    0 1px 0 color-mix(in srgb, #fff 10%, transparent) inset,
+    0 10px 28px color-mix(in srgb, #000 32%, transparent);
+  backdrop-filter: blur(18px) saturate(1.2);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
 }
 
 .overlay.interactive {
-  padding: 0 12px;
+  justify-content: space-between;
+  padding: 0 8px;
+  gap: 6px;
 }
 
 .hud-mid {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   min-width: 0;
   flex: 1;
   justify-content: center;
 }
 
+.overlay.interactive .hud-mid {
+  flex: 1 1 auto;
+}
+
+.overlay.interactive .label {
+  display: none;
+}
+
 .hud-btn {
   appearance: none;
   flex: 0 0 auto;
-  width: 36px;
-  height: 36px;
+  width: 28px;
+  height: 28px;
   margin: 0;
   padding: 0;
   border: 0;
@@ -70,21 +84,27 @@ body {
   display: grid;
   place-items: center;
   cursor: pointer;
+  transition: background 120ms ease, transform 120ms ease;
+}
+
+.hud-btn:active {
+  transform: scale(0.94);
 }
 
 .hud-btn svg {
-  width: 18px;
-  height: 18px;
+  width: 14px;
+  height: 14px;
   display: block;
 }
 
 .hud-cancel {
-  background: color-mix(in srgb, var(--ice-white) 16%, transparent);
-  color: var(--ice-white);
+  background: color-mix(in srgb, var(--ice-white) 12%, transparent);
+  color: color-mix(in srgb, var(--ice-white) 88%, transparent);
 }
 
 .hud-cancel:hover {
-  background: color-mix(in srgb, var(--ice-white) 28%, transparent);
+  background: color-mix(in srgb, var(--ice-white) 22%, transparent);
+  color: var(--ice-white);
 }
 
 .hud-confirm {
@@ -93,53 +113,69 @@ body {
 }
 
 .hud-confirm:hover {
-  background: color-mix(in srgb, var(--aurora-cyan) 35%, var(--ice-white));
+  background: color-mix(in srgb, var(--aurora-cyan) 28%, var(--ice-white));
 }
 
 .wave {
   display: flex;
   align-items: center;
-  gap: 3px;
-  height: 22px;
+  justify-content: center;
+  gap: 2.5px;
+  height: 18px;
 }
 
 .wave span {
   display: block;
-  width: 3px;
-  height: 8px;
+  width: 2.5px;
+  height: 7px;
   border-radius: 999px;
   background: var(--aurora-cyan);
-  animation: wave-bounce 0.9s ease-in-out infinite;
+  transform-origin: center;
+  animation: wave-bounce 0.85s ease-in-out infinite;
 }
 
 .wave span:nth-child(1) {
   animation-delay: 0s;
+  height: 6px;
 }
 .wave span:nth-child(2) {
-  animation-delay: 0.08s;
+  animation-delay: 0.05s;
+  height: 10px;
 }
 .wave span:nth-child(3) {
-  animation-delay: 0.16s;
-}
-.wave span:nth-child(4) {
-  animation-delay: 0.24s;
+  animation-delay: 0.1s;
   height: 14px;
 }
+.wave span:nth-child(4) {
+  animation-delay: 0.15s;
+  height: 18px;
+}
 .wave span:nth-child(5) {
-  animation-delay: 0.16s;
+  animation-delay: 0.2s;
+  height: 14px;
 }
 .wave span:nth-child(6) {
-  animation-delay: 0.08s;
+  animation-delay: 0.25s;
+  height: 10px;
 }
 .wave span:nth-child(7) {
-  animation-delay: 0s;
+  animation-delay: 0.3s;
+  height: 7px;
+}
+.wave span:nth-child(8) {
+  animation-delay: 0.2s;
+  height: 12px;
+}
+.wave span:nth-child(9) {
+  animation-delay: 0.1s;
+  height: 8px;
 }
 
 @keyframes wave-bounce {
   0%,
   100% {
-    transform: scaleY(0.45);
-    opacity: 0.65;
+    transform: scaleY(0.4);
+    opacity: 0.55;
   }
   50% {
     transform: scaleY(1);
@@ -148,8 +184,8 @@ body {
 }
 
 .mark {
-  width: 36px;
-  height: 36px;
+  width: 18px;
+  height: 18px;
   flex: 0 0 auto;
 }
 
@@ -180,11 +216,13 @@ body {
   -webkit-user-select: none;
   overflow: hidden;
   text-overflow: ellipsis;
+  max-width: 9rem;
+  opacity: 0.92;
 }
 
 .pulse {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--aurora-cyan);
   box-shadow: 0 0 0 0 color-mix(in srgb, var(--aurora-cyan) 55%, transparent);
@@ -207,7 +245,7 @@ body {
     box-shadow: 0 0 0 0 color-mix(in srgb, var(--aurora-cyan) 50%, transparent);
   }
   70% {
-    box-shadow: 0 0 0 10px color-mix(in srgb, var(--aurora-cyan) 0%, transparent);
+    box-shadow: 0 0 0 8px color-mix(in srgb, var(--aurora-cyan) 0%, transparent);
   }
   100% {
     box-shadow: 0 0 0 0 color-mix(in srgb, var(--aurora-cyan) 0%, transparent);
@@ -216,7 +254,7 @@ body {
 
 /* Voice-edit: electric blue accent */
 .overlay[data-phase="recording_edit"] {
-  border-color: color-mix(in srgb, var(--electric-blue) 55%, transparent);
+  border-color: color-mix(in srgb, var(--electric-blue) 45%, transparent);
 }
 .overlay[data-phase="recording_edit"] .pulse,
 .overlay[data-phase="recording_edit"] .mark .dot,
@@ -240,7 +278,7 @@ body {
     box-shadow: 0 0 0 0 color-mix(in srgb, var(--electric-blue) 50%, transparent);
   }
   70% {
-    box-shadow: 0 0 0 10px color-mix(in srgb, var(--electric-blue) 0%, transparent);
+    box-shadow: 0 0 0 8px color-mix(in srgb, var(--electric-blue) 0%, transparent);
   }
   100% {
     box-shadow: 0 0 0 0 color-mix(in srgb, var(--electric-blue) 0%, transparent);
@@ -250,7 +288,7 @@ body {
 /* High-risk confirm: amber */
 .overlay[data-phase="confirm"],
 .overlay[data-phase="warn"] {
-  border-color: color-mix(in srgb, var(--amber) 60%, transparent);
+  border-color: color-mix(in srgb, var(--amber) 55%, transparent);
 }
 .overlay[data-phase="confirm"] .pulse,
 .overlay[data-phase="warn"] .pulse {
@@ -263,7 +301,7 @@ body {
 .overlay[data-phase="error"],
 .overlay[data-phase="rejected"],
 .overlay[data-phase="discarded"] {
-  border-color: color-mix(in srgb, var(--risk-red) 65%, transparent);
+  border-color: color-mix(in srgb, var(--risk-red) 60%, transparent);
 }
 .overlay[data-phase="error"] .pulse,
 .overlay[data-phase="rejected"] .pulse,
@@ -281,5 +319,7 @@ body {
   .overlay {
     border-radius: 0;
     box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
 }

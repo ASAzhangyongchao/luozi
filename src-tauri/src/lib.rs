@@ -426,15 +426,20 @@ fn register_session_shortcuts(app: &tauri::AppHandle) -> RegisteredShortcuts {
             let state = event.state;
             match state {
                 ShortcutState::Pressed => {
-                    with_session(&app, |s| {
+                    let token = app.try_state::<AppSessionState>().map(|s| {
                         session::controller::note_hold_pressed(
-                            s,
+                            &s,
                             session::controller::SessionIntent::Continue,
-                        );
+                        )
                     });
+                    let Some(token) = token else {
+                        return;
+                    };
                     std::thread::spawn(move || {
                         with_session(&app, |s| {
-                            if let Err(err) = session::controller::start_continue_session(&app, s) {
+                            if let Err(err) =
+                                session::controller::start_continue_session(&app, s, token)
+                            {
                                 eprintln!("luozi: session_start failed: {err}");
                             }
                         });
@@ -449,13 +454,15 @@ fn register_session_shortcuts(app: &tauri::AppHandle) -> RegisteredShortcuts {
                                 session::controller::SessionIntent::Continue,
                             )
                         });
-                    let Some(session_id) = owned_session_id else {
+                    let Some(owner) = owned_session_id else {
                         return;
                     };
                     std::thread::spawn(move || {
                         with_session(&app, |s| {
                             if !session::controller::wait_until_recording_session(
-                                s, session_id, 800,
+                                s,
+                                owner.session_id,
+                                800,
                             ) {
                                 eprintln!(
                                     "luozi: release before recording ready (will cancel after mic opens)"
@@ -463,10 +470,7 @@ fn register_session_shortcuts(app: &tauri::AppHandle) -> RegisteredShortcuts {
                                 return;
                             }
                             if let Err(err) = session::controller::finish_shortcut_session(
-                                &app,
-                                s,
-                                session::controller::SessionIntent::Continue,
-                                session_id,
+                                &app, s, owner,
                             ) {
                                 eprintln!("luozi: session_stop failed: {err}");
                             }
@@ -515,16 +519,19 @@ fn register_session_shortcuts(app: &tauri::AppHandle) -> RegisteredShortcuts {
                 let app = app.clone();
                 match event.state {
                     ShortcutState::Pressed => {
-                        with_session(&app, |s| {
+                        let token = app.try_state::<AppSessionState>().map(|s| {
                             session::controller::note_hold_pressed(
-                                s,
+                                &s,
                                 session::controller::SessionIntent::VoiceEdit,
-                            );
+                            )
                         });
+                        let Some(token) = token else {
+                            return;
+                        };
                         std::thread::spawn(move || {
                             with_session(&app, |s| {
                                 if let Err(err) =
-                                    session::controller::start_voice_edit_session(&app, s)
+                                    session::controller::start_voice_edit_session(&app, s, token)
                                 {
                                     if err != "draft_empty" {
                                         eprintln!("luozi: voice_edit start failed: {err}");
@@ -540,22 +547,21 @@ fn register_session_shortcuts(app: &tauri::AppHandle) -> RegisteredShortcuts {
                                 session::controller::SessionIntent::VoiceEdit,
                             )
                         });
-                        let Some(session_id) = owned_session_id else {
+                        let Some(owner) = owned_session_id else {
                             return;
                         };
                         std::thread::spawn(move || {
                             with_session(&app, |s| {
                                 if !session::controller::wait_until_recording_session(
-                                    s, session_id, 800,
+                                    s,
+                                    owner.session_id,
+                                    800,
                                 ) {
                                     return;
                                 }
-                                if let Err(err) = session::controller::finish_shortcut_session(
-                                    &app,
-                                    s,
-                                    session::controller::SessionIntent::VoiceEdit,
-                                    session_id,
-                                ) {
+                                if let Err(err) =
+                                    session::controller::finish_shortcut_session(&app, s, owner)
+                                {
                                     eprintln!("luozi: voice_edit stop failed: {err}");
                                 }
                             });

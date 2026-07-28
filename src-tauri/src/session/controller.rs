@@ -30,12 +30,24 @@ pub enum SessionIntent {
     VoiceEdit,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ShortcutHoldToken {
+    intent: SessionIntent,
+    generation: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ShortcutSessionOwner {
+    token: ShortcutHoldToken,
+    pub session_id: u64,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 enum SessionInputSource {
     #[default]
     Direct,
     Menu(SessionIntent),
-    Shortcut(SessionIntent),
+    Shortcut(ShortcutHoldToken),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,10 +56,10 @@ struct ShortcutStartPlan {
     source: SessionInputSource,
 }
 
-fn shortcut_start_plan(intent: SessionIntent) -> ShortcutStartPlan {
+fn shortcut_start_plan(token: ShortcutHoldToken) -> ShortcutStartPlan {
     ShortcutStartPlan {
-        intent,
-        source: SessionInputSource::Shortcut(intent),
+        intent: token.intent,
+        source: SessionInputSource::Shortcut(token),
     }
 }
 
@@ -129,29 +141,84 @@ impl<T> OwnedSessionResource<T> {
 }
 
 #[derive(Default)]
+struct ShortcutHoldState {
+    generation: u64,
+    active: bool,
+    owner_session_id: Option<u64>,
+}
+
+#[derive(Default)]
 struct ShortcutHoldSlot {
-    continue_active: AtomicBool,
-    voice_edit_active: AtomicBool,
+    continue_state: Mutex<ShortcutHoldState>,
+    voice_edit_state: Mutex<ShortcutHoldState>,
 }
 
 impl ShortcutHoldSlot {
-    fn slot(&self, intent: SessionIntent) -> &AtomicBool {
+    fn slot(&self, intent: SessionIntent) -> &Mutex<ShortcutHoldState> {
         match intent {
-            SessionIntent::Continue => &self.continue_active,
-            SessionIntent::VoiceEdit => &self.voice_edit_active,
+            SessionIntent::Continue => &self.continue_state,
+            SessionIntent::VoiceEdit => &self.voice_edit_state,
         }
     }
 
-    fn set(&self, intent: SessionIntent, active: bool) {
-        self.slot(intent).store(active, Ordering::SeqCst);
+    fn press(&self, intent: SessionIntent) -> ShortcutHoldToken {
+        let mut state = self
+            .slot(intent)
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.generation = state
+            .generation
+            .checked_add(1)
+            .expect("shortcut hold generation overflow");
+        state.active = true;
+        state.owner_session_id = None;
+        ShortcutHoldToken {
+            intent,
+            generation: state.generation,
+        }
     }
 
-    fn is_active(&self, intent: SessionIntent) -> bool {
-        self.slot(intent).load(Ordering::SeqCst)
+    fn release(&self, intent: SessionIntent) -> Option<ShortcutSessionOwner> {
+        let mut state = self
+            .slot(intent)
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.active = false;
+        state
+            .owner_session_id
+            .map(|session_id| ShortcutSessionOwner {
+                token: ShortcutHoldToken {
+                    intent,
+                    generation: state.generation,
+                },
+                session_id,
+            })
+    }
+
+    fn is_active(&self, token: ShortcutHoldToken, session_id: u64) -> bool {
+        self.slot(token.intent).lock().is_ok_and(|state| {
+            state.generation == token.generation
+                && state.active
+                && state.owner_session_id == Some(session_id)
+        })
+    }
+
+    fn clear_owner(&self, token: ShortcutHoldToken, session_id: u64) -> bool {
+        let mut state = self
+            .slot(token.intent)
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if state.generation != token.generation || state.owner_session_id != Some(session_id) {
+            return false;
+        }
+        state.active = false;
+        state.owner_session_id = None;
+        true
     }
 
     fn any_active(&self) -> bool {
-        self.continue_active.load(Ordering::SeqCst) || self.voice_edit_active.load(Ordering::SeqCst)
+        self.continue_state.lock().is_ok_and(|state| state.active)
+            || self.voice_edit_state.lock().is_ok_and(|state| state.active)
     }
 }
 
@@ -270,7 +337,7 @@ fn cleanup_session_resources_locked(
     _machine: &mut SessionMachine,
     session_id: u64,
 ) {
-    prepare_cancel_state(state);
+    cleanup_session_input(state, session_id);
     state.energy_session.deactivate(session_id);
     if let Ok(mut recorder) = state.recorder.lock() {
         recorder.cleanup_if_owned(session_id, SessionRecorder::cancel);
@@ -553,18 +620,32 @@ fn claim_session_with_intent(
     )
 }
 
-#[cfg(test)]
-fn claim_shortcut_session_with_intent(
+fn claim_shortcut_session_with_token(
     state: &AppSessionState,
-    start_intent: SessionIntent,
+    token: ShortcutHoldToken,
 ) -> Result<SessionEffect, String> {
     let mut machine = state.machine.lock().map_err(|_| "session_lock_failed")?;
-    claim_session_with_intent_locked(
-        state,
-        &mut machine,
-        start_intent,
-        SessionInputSource::Shortcut(start_intent),
-    )
+    let mut intent = state.intent.lock().map_err(|_| "intent_lock_failed")?;
+    let mut hold = state
+        .shortcut_holds
+        .slot(token.intent)
+        .lock()
+        .map_err(|_| "shortcut_hold_lock_failed")?;
+    if hold.generation != token.generation {
+        return Err("shortcut_press_stale".into());
+    }
+    let effect = machine.handle(SessionCommand::Start);
+    if let SessionEffect::BeganRecording { session_id } = effect {
+        intent.bind(
+            session_id,
+            token.intent,
+            SessionInputSource::Shortcut(token),
+        );
+        hold.owner_session_id = Some(session_id);
+        Ok(SessionEffect::BeganRecording { session_id })
+    } else {
+        Ok(effect)
+    }
 }
 
 fn decide_menu_toggle(state: &AppSessionState, start_intent: SessionIntent) -> MenuToggleDecision {
@@ -614,15 +695,25 @@ fn decide_menu_toggle(state: &AppSessionState, start_intent: SessionIntent) -> M
     }
 }
 
-fn prepare_cancel_state(state: &AppSessionState) {
-    state.shortcut_holds.set(SessionIntent::Continue, false);
-    state.shortcut_holds.set(SessionIntent::VoiceEdit, false);
-    state.menu_active.store(false, Ordering::SeqCst);
+fn cleanup_session_input(state: &AppSessionState, session_id: u64) {
+    match session_input_source_for(state, session_id) {
+        Some(SessionInputSource::Shortcut(token)) => {
+            state.shortcut_holds.clear_owner(token, session_id);
+        }
+        Some(SessionInputSource::Menu(_)) => {
+            if let Ok(mut owner) = state.menu_session_id.lock() {
+                if *owner == Some(session_id) {
+                    *owner = None;
+                    state.menu_active.store(false, Ordering::SeqCst);
+                }
+            }
+        }
+        Some(SessionInputSource::Direct) => {
+            state.hold_active.store(false, Ordering::SeqCst);
+        }
+        None => {}
+    }
     refresh_hold_active(state);
-    let _ = state
-        .menu_session_id
-        .lock()
-        .map(|mut session_id| *session_id = None);
 }
 
 fn is_menu_session(state: &AppSessionState, session_id: u64) -> bool {
@@ -638,7 +729,9 @@ fn session_input_is_active(state: &AppSessionState, session_id: u64) -> bool {
         Some(SessionInputSource::Menu(_)) => {
             state.menu_active.load(Ordering::SeqCst) && is_menu_session(state, session_id)
         }
-        Some(SessionInputSource::Shortcut(intent)) => state.shortcut_holds.is_active(intent),
+        Some(SessionInputSource::Shortcut(token)) => {
+            state.shortcut_holds.is_active(token, session_id)
+        }
         Some(SessionInputSource::Direct) => state.hold_active.load(Ordering::SeqCst),
         None => false,
     }
@@ -1370,15 +1463,23 @@ fn prepare_voice_edit(app: &AppHandle) -> Result<(), String> {
 pub fn start_voice_edit_session(
     app: &AppHandle,
     state: &AppSessionState,
+    token: ShortcutHoldToken,
 ) -> Result<SessionStatus, String> {
-    start_shortcut_session(app, state, SessionIntent::VoiceEdit)
+    if token.intent != SessionIntent::VoiceEdit {
+        return Err("shortcut_intent_mismatch".into());
+    }
+    start_shortcut_session(app, state, token)
 }
 
 pub fn start_continue_session(
     app: &AppHandle,
     state: &AppSessionState,
+    token: ShortcutHoldToken,
 ) -> Result<SessionStatus, String> {
-    start_shortcut_session(app, state, SessionIntent::Continue)
+    if token.intent != SessionIntent::Continue {
+        return Err("shortcut_intent_mismatch".into());
+    }
+    start_shortcut_session(app, state, token)
 }
 
 fn run_menu_toggle(
@@ -1887,23 +1988,19 @@ pub fn consent_current_text_ai(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-pub fn note_hold_pressed(state: &AppSessionState, intent: SessionIntent) {
-    state.shortcut_holds.set(intent, true);
+pub fn note_hold_pressed(state: &AppSessionState, intent: SessionIntent) -> ShortcutHoldToken {
+    let token = state.shortcut_holds.press(intent);
     refresh_hold_active(state);
+    token
 }
 
-pub fn note_hold_released(state: &AppSessionState, intent: SessionIntent) -> Option<u64> {
-    state.shortcut_holds.set(intent, false);
+pub fn note_hold_released(
+    state: &AppSessionState,
+    intent: SessionIntent,
+) -> Option<ShortcutSessionOwner> {
+    let owner = state.shortcut_holds.release(intent);
     refresh_hold_active(state);
-    let session_id = state
-        .machine
-        .lock()
-        .ok()
-        .and_then(|machine| machine.recording_session_id())?;
-    if session_input_source_for(state, session_id) != Some(SessionInputSource::Shortcut(intent)) {
-        return None;
-    }
-    Some(session_id)
+    owner
 }
 
 #[allow(dead_code)]
@@ -1944,12 +2041,12 @@ pub fn start_session(app: &AppHandle, state: &AppSessionState) -> Result<Session
 pub fn start_shortcut_session(
     app: &AppHandle,
     state: &AppSessionState,
-    intent: SessionIntent,
+    token: ShortcutHoldToken,
 ) -> Result<SessionStatus, String> {
-    if intent == SessionIntent::VoiceEdit {
+    if token.intent == SessionIntent::VoiceEdit {
         prepare_voice_edit(app)?;
     }
-    let plan = shortcut_start_plan(intent);
+    let plan = shortcut_start_plan(token);
     // HARD RULE: never wait on Accessibility before opening the mic.
     // Capture runs in the background; deliver path falls back to clipboard+⌘V.
     start_session_with_token_claim(app, state, dummy_token(), None, plan.intent, plan.source)
@@ -2010,8 +2107,13 @@ fn start_session_with_token_claim(
         }
         SessionEffect::BeganRecording { session_id }
     } else {
-        let mut machine = state.machine.lock().map_err(|_| "session_lock_failed")?;
-        claim_session_with_intent_locked(state, &mut machine, start_intent, input_source)?
+        match input_source {
+            SessionInputSource::Shortcut(token) => claim_shortcut_session_with_token(state, token)?,
+            _ => {
+                let mut machine = state.machine.lock().map_err(|_| "session_lock_failed")?;
+                claim_session_with_intent_locked(state, &mut machine, start_intent, input_source)?
+            }
+        }
     };
 
     match effect {
@@ -2246,7 +2348,7 @@ fn stop_session_if_current(
             }
         };
 
-        prepare_cancel_state(state);
+        cleanup_session_input(state, session_id);
         let effect = machine.handle(SessionCommand::Stop {
             duration_ms: audio.duration_ms,
         });
@@ -2286,17 +2388,17 @@ pub fn stop_session(app: &AppHandle, state: &AppSessionState) -> Result<SessionS
 pub fn finish_shortcut_session(
     app: &AppHandle,
     state: &AppSessionState,
-    intent: SessionIntent,
-    session_id: u64,
+    owner: ShortcutSessionOwner,
 ) -> Result<SessionStatus, String> {
-    if session_input_source_for(state, session_id) != Some(SessionInputSource::Shortcut(intent)) {
+    if session_input_source_for(state, owner.session_id)
+        != Some(SessionInputSource::Shortcut(owner.token))
+    {
         return status_from(state, "stop_ignored".into());
     }
-    stop_session_if_current(app, state, Some(session_id))
+    stop_session_if_current(app, state, Some(owner.session_id))
 }
 
 pub fn cancel_session(app: &AppHandle, state: &AppSessionState) -> Result<SessionStatus, String> {
-    prepare_cancel_state(state);
     let session_id = state
         .machine
         .lock()
@@ -2825,12 +2927,20 @@ mod session_resource_tests {
 #[cfg(test)]
 mod menu_toggle_tests {
     use super::{
-        claim_shortcut_session_with_intent, decide_menu_toggle, note_hold_pressed,
-        note_hold_released, prepare_cancel_state, recording_phase_copy, session_input_is_active,
-        session_intent_for, shortcut_start_plan, AppSessionState, MenuToggleDecision,
-        SessionCommand, SessionEffect, SessionInputSource, SessionIntent,
+        cancel_session_if_current, claim_shortcut_session_with_token, decide_menu_toggle,
+        note_hold_pressed, note_hold_released, recording_phase_copy, session_input_is_active,
+        session_input_source_for, session_intent_for, shortcut_start_plan, AppSessionState,
+        MenuToggleDecision, SessionCommand, SessionEffect, SessionInputSource, SessionIntent,
+        ShortcutHoldToken,
     };
     use std::sync::atomic::Ordering;
+
+    fn claim_shortcut(state: &AppSessionState, token: ShortcutHoldToken) -> u64 {
+        match claim_shortcut_session_with_token(state, token).expect("claim") {
+            SessionEffect::BeganRecording { session_id } => session_id,
+            other => panic!("expected recording, got {other:?}"),
+        }
+    }
 
     #[test]
     fn idle_menu_action_claims_recording_and_sets_menu_hold() {
@@ -2889,7 +2999,7 @@ mod menu_toggle_tests {
             MenuToggleDecision::Start { session_id: 0 }
         );
 
-        prepare_cancel_state(&state);
+        assert!(cancel_session_if_current(&state, 0));
 
         assert!(!state.hold_active.load(Ordering::SeqCst));
         assert!(!state.menu_active.load(Ordering::SeqCst));
@@ -2987,13 +3097,8 @@ mod menu_toggle_tests {
     #[test]
     fn menu_toggle_cannot_finish_a_shortcut_owned_session() {
         let state = AppSessionState::default();
-        note_hold_pressed(&state, SessionIntent::Continue);
-        let session_id = match claim_shortcut_session_with_intent(&state, SessionIntent::Continue)
-            .expect("claim")
-        {
-            SessionEffect::BeganRecording { session_id } => session_id,
-            other => panic!("expected recording, got {other:?}"),
-        };
+        let token = note_hold_pressed(&state, SessionIntent::Continue);
+        let session_id = claim_shortcut(&state, token);
 
         assert_eq!(
             decide_menu_toggle(&state, SessionIntent::Continue),
@@ -3013,13 +3118,8 @@ mod menu_toggle_tests {
     #[test]
     fn continue_shortcut_release_cannot_clear_voice_edit_shortcut_hold() {
         let state = AppSessionState::default();
-        note_hold_pressed(&state, SessionIntent::VoiceEdit);
-        let session_id = match claim_shortcut_session_with_intent(&state, SessionIntent::VoiceEdit)
-            .expect("claim")
-        {
-            SessionEffect::BeganRecording { session_id } => session_id,
-            other => panic!("expected recording, got {other:?}"),
-        };
+        let token = note_hold_pressed(&state, SessionIntent::VoiceEdit);
+        let session_id = claim_shortcut(&state, token);
 
         assert_eq!(note_hold_released(&state, SessionIntent::Continue), None);
 
@@ -3029,8 +3129,8 @@ mod menu_toggle_tests {
             Some(SessionIntent::VoiceEdit)
         );
         assert_eq!(
-            note_hold_released(&state, SessionIntent::VoiceEdit),
-            Some(session_id)
+            note_hold_released(&state, SessionIntent::VoiceEdit).map(|owner| owner.session_id),
+            Some(session_id),
         );
         assert!(!state.hold_active.load(Ordering::SeqCst));
     }
@@ -3055,7 +3155,7 @@ mod menu_toggle_tests {
     fn release_before_shortcut_claim_is_not_masked_by_another_shortcut_hold() {
         let state = AppSessionState::default();
         note_hold_pressed(&state, SessionIntent::VoiceEdit);
-        note_hold_pressed(&state, SessionIntent::Continue);
+        let continue_token = note_hold_pressed(&state, SessionIntent::Continue);
 
         assert_eq!(note_hold_released(&state, SessionIntent::Continue), None);
         assert!(
@@ -3063,12 +3163,7 @@ mod menu_toggle_tests {
             "voice edit remains held"
         );
 
-        let session_id = match claim_shortcut_session_with_intent(&state, SessionIntent::Continue)
-            .expect("claim")
-        {
-            SessionEffect::BeganRecording { session_id } => session_id,
-            other => panic!("expected recording, got {other:?}"),
-        };
+        let session_id = claim_shortcut(&state, continue_token);
         assert!(!session_input_is_active(&state, session_id));
         assert_eq!(note_hold_released(&state, SessionIntent::VoiceEdit), None);
         assert!(!state.hold_active.load(Ordering::SeqCst));
@@ -3076,10 +3171,48 @@ mod menu_toggle_tests {
 
     #[test]
     fn continue_production_start_plan_uses_continue_shortcut_ownership() {
+        let state = AppSessionState::default();
+        let token = note_hold_pressed(&state, SessionIntent::Continue);
         assert_eq!(
-            shortcut_start_plan(SessionIntent::Continue).source,
-            SessionInputSource::Shortcut(SessionIntent::Continue)
+            shortcut_start_plan(token).source,
+            SessionInputSource::Shortcut(token)
         );
+    }
+
+    #[test]
+    fn old_continue_cleanup_does_not_clear_a_new_continue_press() {
+        let state = AppSessionState::default();
+        let old_token = note_hold_pressed(&state, SessionIntent::Continue);
+        let old_session_id = claim_shortcut(&state, old_token);
+        let old_release =
+            note_hold_released(&state, SessionIntent::Continue).expect("old release owner");
+        assert_eq!(old_release.session_id, old_session_id);
+
+        let new_token = note_hold_pressed(&state, SessionIntent::Continue);
+        assert!(cancel_session_if_current(&state, old_session_id));
+
+        assert!(state.hold_active.load(Ordering::SeqCst));
+        let new_session_id = claim_shortcut(&state, new_token);
+        assert!(session_input_is_active(&state, new_session_id));
+        assert_ne!(
+            session_input_source_for(&state, new_session_id),
+            Some(SessionInputSource::Shortcut(old_release.token)),
+            "the old release cannot own or stop generation 2",
+        );
+    }
+
+    #[test]
+    fn continue_cleanup_does_not_clear_a_waiting_voice_edit_press() {
+        let state = AppSessionState::default();
+        let continue_token = note_hold_pressed(&state, SessionIntent::Continue);
+        let continue_session_id = claim_shortcut(&state, continue_token);
+        let voice_token = note_hold_pressed(&state, SessionIntent::VoiceEdit);
+
+        assert!(cancel_session_if_current(&state, continue_session_id));
+        assert!(state.hold_active.load(Ordering::SeqCst));
+
+        let voice_session_id = claim_shortcut(&state, voice_token);
+        assert!(session_input_is_active(&state, voice_session_id));
     }
 }
 

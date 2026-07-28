@@ -17,8 +17,16 @@ type AppConfig = {
   shortcutsProvisional: boolean;
 };
 
+type HistoryItem = {
+  id: string;
+  text: string;
+  createdAt: number;
+  preview: string;
+};
+
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
 let applyingRemote = false;
+let currentNav: "draft" | "history" = "draft";
 
 const editor = () => document.querySelector<HTMLTextAreaElement>("#editor")!;
 const saveHint = () => document.querySelector<HTMLParagraphElement>("#saveHint")!;
@@ -26,6 +34,116 @@ const statusEl = () => document.querySelector<HTMLParagraphElement>("#status")!;
 const btnUndo = () => document.querySelector<HTMLButtonElement>("#btnUndo")!;
 const btnRedo = () => document.querySelector<HTMLButtonElement>("#btnRedo")!;
 const btnLoadLast = () => document.querySelector<HTMLButtonElement>("#btnLoadLast")!;
+const draftPane = () => document.querySelector<HTMLElement>("#draftPane")!;
+const historyPane = () => document.querySelector<HTMLElement>("#historyPane")!;
+const draftActions = () => document.querySelector<HTMLElement>("#draftActions")!;
+const draftFooterHint = () => document.querySelector<HTMLElement>("#draftFooterHint")!;
+const wbTitle = () => document.querySelector<HTMLElement>("#wbTitle")!;
+const historyList = () => document.querySelector<HTMLElement>("#historyList")!;
+const historyEmpty = () => document.querySelector<HTMLElement>("#historyEmpty")!;
+
+function formatTime(secs: number): string {
+  try {
+    return new Date(secs * 1000).toLocaleString("zh-CN", {
+      month: "numeric",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return String(secs);
+  }
+}
+
+function setRailActive(nav: "draft" | "history") {
+  document.querySelectorAll<HTMLButtonElement>(".rail-nav .rail-item").forEach((btn) => {
+    const on = btn.dataset.nav === nav;
+    btn.classList.toggle("active", on);
+    if (on) btn.setAttribute("aria-current", "page");
+    else btn.removeAttribute("aria-current");
+  });
+}
+
+async function showDraftView() {
+  currentNav = "draft";
+  setRailActive("draft");
+  draftPane().hidden = false;
+  historyPane().hidden = true;
+  draftActions().hidden = false;
+  draftFooterHint().hidden = false;
+  wbTitle().textContent = "语音草稿";
+  await getCurrentWindow().setTitle("落字 · 语音草稿");
+}
+
+async function refreshHistory() {
+  const items = await invoke<HistoryItem[]>("history_list");
+  const list = historyList();
+  list.replaceChildren();
+  historyEmpty().hidden = items.length > 0;
+  for (const item of items) {
+    const row = document.createElement("article");
+    row.className = "history-item";
+    row.setAttribute("role", "listitem");
+
+    const meta = document.createElement("div");
+    meta.className = "history-item-meta";
+    meta.textContent = formatTime(item.createdAt);
+
+    const body = document.createElement("p");
+    body.className = "history-item-text";
+    body.textContent = item.preview || item.text;
+
+    const actions = document.createElement("div");
+    actions.className = "history-item-actions";
+
+    const btnCopy = document.createElement("button");
+    btnCopy.type = "button";
+    btnCopy.textContent = "复制";
+    btnCopy.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(item.text);
+        statusEl().textContent = "已复制历史条目";
+      } catch {
+        statusEl().textContent = "复制失败";
+      }
+    });
+
+    const btnLoad = document.createElement("button");
+    btnLoad.type = "button";
+    btnLoad.className = "primary-ghost";
+    btnLoad.textContent = "载入草稿";
+    btnLoad.addEventListener("click", async () => {
+      try {
+        applyState(await invoke("history_load_into_draft", { id: item.id }));
+        await showDraftView();
+        statusEl().textContent = "已载入到草稿";
+      } catch (err) {
+        statusEl().textContent = `载入失败：${err}`;
+      }
+    });
+
+    actions.append(btnCopy, btnLoad);
+    row.append(meta, body, actions);
+    list.append(row);
+  }
+}
+
+async function showHistoryView() {
+  currentNav = "history";
+  setRailActive("history");
+  draftPane().hidden = true;
+  historyPane().hidden = false;
+  draftActions().hidden = true;
+  draftFooterHint().hidden = true;
+  wbTitle().textContent = "落字历史";
+  await getCurrentWindow().setTitle("落字 · 落字历史");
+  try {
+    await refreshHistory();
+    statusEl().textContent = "历史 · 本机保存";
+  } catch (err) {
+    statusEl().textContent = `加载历史失败：${err}`;
+  }
+}
 
 /** Convert UTF-16 textarea offset → UTF-8 byte offset for Rust string slicing. */
 function utf8ByteOffset(text: string, utf16Index: number): number {
@@ -174,9 +292,18 @@ async function main() {
       statusEl().textContent = `打开教程失败：${err}`;
     }
   });
+  document.querySelector<HTMLButtonElement>('[data-nav="draft"]')?.addEventListener("click", () => {
+    void showDraftView();
+  });
+  document.querySelector("#btnRailHistory")?.addEventListener("click", () => {
+    void showHistoryView();
+  });
 
   await listen("draft://updated", async (ev) => {
     await refresh();
+    if (currentNav === "history") {
+      await refreshHistory();
+    }
     const reason = (ev.payload as { reason?: string } | null)?.reason;
     statusEl().textContent =
       reason === "voice_edit" ? "已修改" : reason === "load_last" ? "已载入最近落字" : "已写入草稿";

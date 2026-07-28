@@ -6,6 +6,7 @@ pub mod config_store;
 pub mod consent;
 pub mod credentials;
 pub mod draft;
+pub mod history;
 mod clipboard;
 pub mod controller;
 pub mod model_store;
@@ -17,3 +18,4 @@ pub use controller::{
     session_cancel, session_start, session_status, session_stop, session_undo_last, AppSessionState,
 };
 pub use draft::{DraftStateDto, DraftStore};
+pub use history::{HistoryItemDto, HistoryStore};

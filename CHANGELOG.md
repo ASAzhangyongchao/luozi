@@ -4,6 +4,7 @@
 
 ### Added
 
+- Local dictation history (≤50 entries, 2k chars/entry) in App Support `history.json`; draft rail「历史」with copy / load-to-draft
 - Typeless-inspired recording HUD: cancel · waveform · confirm (hold-to-talk; confirm = release/stop)
 - Tray left-click and Dock reopen open the voice draft workbench (right-click menu unchanged for Settings / How to use)
 - Draft workbench left rail (Typeless-inspired): 草稿 / 历史占位 / 设置 / 教程 — settings & guide open without relying on the menu-bar icon

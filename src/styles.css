@@ -31,7 +31,8 @@
 
 body {
   margin: 0;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
   background:
     radial-gradient(
       900px 420px at 8% -20%,
@@ -39,6 +40,10 @@ body {
       transparent 55%
     ),
     var(--content-bg);
+}
+
+[hidden] {
+  display: none !important;
 }
 
 .container {
@@ -220,16 +225,20 @@ code {
 .app-shell {
   display: grid;
   grid-template-columns: 72px minmax(0, 1fr);
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 
 .app-rail {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  height: 100%;
+  min-height: 0;
   padding: 12px 8px;
   border-right: 1px solid var(--line);
   background: var(--surface-raised);
+  overflow: hidden;
 }
 
 .rail-nav,
@@ -299,10 +308,12 @@ code {
 .workbench {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  height: 100%;
+  min-height: 0;
   min-width: 0;
   max-width: none;
   margin: 0;
+  overflow: hidden;
 }
 
 .wb-toolbar {
@@ -315,8 +326,7 @@ code {
   background: var(--control-glass);
   backdrop-filter: blur(14px) saturate(1.15);
   -webkit-backdrop-filter: blur(14px) saturate(1.15);
-  position: sticky;
-  top: 0;
+  flex-shrink: 0;
   z-index: 2;
 }
 
@@ -352,12 +362,14 @@ code {
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-height: 0;
   padding: 12px 16px 0;
+  overflow: auto;
 }
 
 #editor {
   flex: 1;
-  min-height: 360px;
+  min-height: 200px;
   width: 100%;
   box-sizing: border-box;
   resize: none;
@@ -386,7 +398,8 @@ code {
 .wb-footer {
   padding: 10px 16px 16px;
   border-top: 1px solid var(--line);
-  margin-top: 12px;
+  margin-top: 0;
+  flex-shrink: 0;
 }
 
 .wb-status {
@@ -517,6 +530,11 @@ code {
   overflow: hidden;
 }
 
+.settings-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+
 .settings-dialog::backdrop {
   background: color-mix(in srgb, var(--night-teal) 42%, transparent);
   backdrop-filter: blur(2px);
@@ -530,6 +548,7 @@ code {
   padding: 10px 14px;
   border-bottom: 1px solid var(--line);
   background: var(--surface-raised);
+  flex-shrink: 0;
 }
 
 .settings-dialog-bar strong {
@@ -552,12 +571,20 @@ code {
   border-color: color-mix(in srgb, var(--aurora-cyan) 45%, transparent);
 }
 
-.settings-frame {
-  display: block;
-  width: 100%;
-  height: calc(100% - 45px);
-  border: 0;
-  background: var(--content-bg);
+.settings-dialog .settings-shell {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  grid-template-rows: 1fr;
+}
+
+.settings-dialog .settings-nav {
+  overflow: auto;
+}
+
+.settings-dialog .settings-main {
+  overflow: auto;
+  min-height: 0;
 }
 
 .spike-panel {

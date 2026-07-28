@@ -45,8 +45,13 @@ body.settings-body {
 
 .settings-shell {
   display: grid;
-  grid-template-columns: 168px 1fr;
+  grid-template-columns: 168px minmax(0, 1fr);
   min-height: 100vh;
+}
+
+body.settings-embed .settings-shell,
+.settings-dialog .settings-shell {
+  min-height: 0;
 }
 
 .settings-nav {
@@ -107,7 +112,8 @@ body.settings-body {
   border-bottom: 1px solid var(--line);
 }
 
-.row strong {
+.settings-shell .row strong,
+.guide-shell .row strong {
   font-size: 14px;
 }
 
@@ -123,7 +129,8 @@ body.settings-body {
   margin-top: 14px;
 }
 
-button {
+.settings-shell button,
+.guide-footer button {
   appearance: none;
   border: 1px solid color-mix(in srgb, var(--night-teal) 14%, transparent);
   background: color-mix(in srgb, #ffffff 55%, transparent);
@@ -134,11 +141,12 @@ button {
   cursor: pointer;
 }
 
-button:hover:not(:disabled) {
+.settings-shell button:hover:not(:disabled),
+.guide-footer button:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
 }
 
-button:disabled {
+.settings-shell button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
@@ -168,7 +176,8 @@ button:disabled {
   border-color: color-mix(in srgb, var(--ok) 40%, var(--line));
 }
 
-code {
+.settings-shell code,
+.guide-shell code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
   padding: 4px 8px;

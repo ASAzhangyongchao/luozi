@@ -522,7 +522,7 @@ pub fn capture_source_token(app: &AppHandle) -> TargetToken {
 
 fn place_overlay_bottom_center(window: &tauri::WebviewWindow, interactive: bool) {
     // Compact Typeless-like pill; interactive needs room for cancel / wave / confirm.
-    let width = if interactive { 268.0 } else { 188.0 };
+    let width = if interactive { 300.0 } else { 188.0 };
     let height = 52.0;
     let bottom_gap = 64.0;
     let _ = window.set_size(LogicalSize::new(width, height));

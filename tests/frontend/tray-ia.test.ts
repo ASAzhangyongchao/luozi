@@ -100,6 +100,19 @@ describe("tray information architecture", () => {
     );
   });
 
+  it("routes tray dictation actions through asynchronous menu toggles", () => {
+    const tray = buildTraySource();
+    const handlerStart = tray.indexOf(".on_menu_event");
+    const handlerEnd = tray.indexOf(".on_tray_icon_event", handlerStart);
+    const handler = tray.slice(handlerStart, handlerEnd);
+
+    expect(handler).toContain("toggle_continue_menu_session");
+    expect(handler).toContain("toggle_voice_edit_menu_session");
+    expect(handler).not.toContain("start_continue_session");
+    expect(handler).not.toContain("start_voice_edit_session");
+    expect(handler.match(/std::thread::spawn/g)?.length).toBeGreaterThanOrEqual(2);
+  });
+
   it("shares verified model readiness with settings", () => {
     const tray = buildTraySource();
 

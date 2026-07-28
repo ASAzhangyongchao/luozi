@@ -145,7 +145,7 @@ fn cleanup_session_resources_locked(
     _machine: &mut SessionMachine,
     session_id: u64,
 ) {
-    state.hold_active.store(false, Ordering::SeqCst);
+    prepare_cancel_state(state);
     state.energy_session.deactivate(session_id);
     if let Ok(mut recorder) = state.recorder.lock() {
         recorder.cancel();
@@ -297,6 +297,10 @@ pub struct AppSessionState {
     /// Hold-to-talk: true while continue-speaking key is down.
     /// Cleared on Released / Esc. Start checks this after mic opens (TCC can block).
     pub hold_active: AtomicBool,
+    /// Menu toggle is active while a menu-started recording awaits its second click.
+    menu_active: AtomicBool,
+    /// Recording ownership marker retained until stop/cancel completes.
+    menu_session_id: Mutex<Option<u64>>,
     /// Frontmost app pid when recording started (for restore + paste/type).
     pub source_pid: Mutex<Option<i32>>,
     /// Model download in flight (tray debounce).
@@ -320,6 +324,8 @@ impl Default for AppSessionState {
             asr_last_used: Mutex::new(None),
             registered_continue: Mutex::new(None),
             hold_active: AtomicBool::new(false),
+            menu_active: AtomicBool::new(false),
+            menu_session_id: Mutex::new(None),
             source_pid: Mutex::new(None),
             model_fetching: AtomicBool::new(false),
             intent: Mutex::new(SessionIntent::Continue),
@@ -328,6 +334,68 @@ impl Default for AppSessionState {
             config: super::config_store::load(),
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MenuToggleDecision {
+    Start { session_id: u64 },
+    Finish { session_id: u64 },
+    RejectedBusy,
+}
+
+fn decide_menu_toggle(state: &AppSessionState, start_intent: SessionIntent) -> MenuToggleDecision {
+    let Ok(mut machine) = state.machine.lock() else {
+        return MenuToggleDecision::RejectedBusy;
+    };
+
+    match machine.phase() {
+        SessionPhase::Idle => {
+            let SessionEffect::BeganRecording { session_id } =
+                machine.handle(SessionCommand::Start)
+            else {
+                return MenuToggleDecision::RejectedBusy;
+            };
+            let Ok(mut intent) = state.intent.lock() else {
+                let _ = machine.handle(SessionCommand::Cancel);
+                return MenuToggleDecision::RejectedBusy;
+            };
+            let Ok(mut menu_session_id) = state.menu_session_id.lock() else {
+                let _ = machine.handle(SessionCommand::Cancel);
+                return MenuToggleDecision::RejectedBusy;
+            };
+            *intent = start_intent;
+            *menu_session_id = Some(session_id);
+            state.menu_active.store(true, Ordering::SeqCst);
+            state.hold_active.store(true, Ordering::SeqCst);
+            MenuToggleDecision::Start { session_id }
+        }
+        SessionPhase::Recording { session_id } => {
+            let session_id = *session_id;
+            state.menu_active.store(false, Ordering::SeqCst);
+            state.hold_active.store(false, Ordering::SeqCst);
+            MenuToggleDecision::Finish { session_id }
+        }
+        SessionPhase::Transcribing { .. } | SessionPhase::Delivering { .. } => {
+            MenuToggleDecision::RejectedBusy
+        }
+    }
+}
+
+fn prepare_cancel_state(state: &AppSessionState) {
+    state.hold_active.store(false, Ordering::SeqCst);
+    state.menu_active.store(false, Ordering::SeqCst);
+    let _ = state
+        .menu_session_id
+        .lock()
+        .map(|mut session_id| *session_id = None);
+}
+
+fn is_menu_session(state: &AppSessionState, session_id: u64) -> bool {
+    state
+        .menu_session_id
+        .lock()
+        .ok()
+        .is_some_and(|current| *current == Some(session_id))
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -435,6 +503,26 @@ fn registered_shortcut_label(state: &AppSessionState) -> String {
         .unwrap_or_else(|| super::config_store::load().continue_speaking_shortcut)
 }
 
+fn recording_phase_copy(
+    state: &AppSessionState,
+    session_id: u64,
+    editing: bool,
+) -> (&'static str, String) {
+    let phase = if editing {
+        "recording_edit"
+    } else {
+        "recording"
+    };
+    if is_menu_session(state, session_id) {
+        return (phase, "再次点击菜单完成 · Esc 取消".into());
+    }
+    if editing {
+        return (phase, "说修改要求… · Esc 取消".into());
+    }
+    let shortcut = registered_shortcut_label(state);
+    (phase, format!("松开 {shortcut} 开始整理 · Esc 取消"))
+}
+
 fn emit_recording_phase_if_current(
     app: &AppHandle,
     state: &AppSessionState,
@@ -442,22 +530,8 @@ fn emit_recording_phase_if_current(
     editing: bool,
 ) -> bool {
     with_recording_session_if_current(state, session_id, || {
-        if editing {
-            emit_phase(
-                app,
-                Some(session_id),
-                "recording_edit",
-                "说修改要求… · Esc 取消",
-            );
-        } else {
-            let shortcut = registered_shortcut_label(state);
-            emit_phase(
-                app,
-                Some(session_id),
-                "recording",
-                &format!("松开 {shortcut} 开始整理 · Esc 取消"),
-            );
-        }
+        let (phase, message) = recording_phase_copy(state, session_id, editing);
+        emit_phase(app, Some(session_id), phase, &message);
     })
 }
 
@@ -1028,11 +1102,7 @@ fn apply_voice_edit(
     }
 }
 
-/// Open draft, ensure content, then start hold-to-talk as a voice-edit session.
-pub fn start_voice_edit_session(
-    app: &AppHandle,
-    state: &AppSessionState,
-) -> Result<SessionStatus, String> {
+fn prepare_voice_edit(app: &AppHandle) -> Result<(), String> {
     // Show workbench first.
     if let Some(main) = app.get_webview_window("main") {
         let _ = main.show();
@@ -1052,7 +1122,15 @@ pub fn start_voice_edit_session(
             return Err("draft_empty".into());
         }
     }
+    Ok(())
+}
 
+/// Open draft, ensure content, then start hold-to-talk as a voice-edit session.
+pub fn start_voice_edit_session(
+    app: &AppHandle,
+    state: &AppSessionState,
+) -> Result<SessionStatus, String> {
+    prepare_voice_edit(app)?;
     let _ = state
         .intent
         .lock()
@@ -1069,6 +1147,56 @@ pub fn start_continue_session(
         .lock()
         .map(|mut g| *g = SessionIntent::Continue);
     start_session(app, state)
+}
+
+fn run_menu_toggle(
+    app: &AppHandle,
+    state: &AppSessionState,
+    decision: MenuToggleDecision,
+) -> Result<SessionStatus, String> {
+    match decision {
+        MenuToggleDecision::Start { session_id } => {
+            start_claimed_session(app, state, dummy_token(), session_id)
+        }
+        MenuToggleDecision::Finish { session_id } => {
+            stop_session_if_current(app, state, Some(session_id))
+        }
+        MenuToggleDecision::RejectedBusy => {
+            eprintln!("luozi: menu toggle ignored (session busy)");
+            Err("session_busy".into())
+        }
+    }
+}
+
+pub fn toggle_continue_menu_session(
+    app: &AppHandle,
+    state: &AppSessionState,
+) -> Result<SessionStatus, String> {
+    run_menu_toggle(
+        app,
+        state,
+        decide_menu_toggle(state, SessionIntent::Continue),
+    )
+}
+
+pub fn toggle_voice_edit_menu_session(
+    app: &AppHandle,
+    state: &AppSessionState,
+) -> Result<SessionStatus, String> {
+    let phase = state
+        .machine
+        .lock()
+        .map_err(|_| "session_lock_failed")?
+        .phase()
+        .clone();
+    if matches!(phase, SessionPhase::Idle) {
+        prepare_voice_edit(app)?;
+    }
+    run_menu_toggle(
+        app,
+        state,
+        decide_menu_toggle(state, SessionIntent::VoiceEdit),
+    )
 }
 
 fn apply_delivery(
@@ -1593,18 +1721,47 @@ pub fn start_session_with_token(
     state: &AppSessionState,
     token: TargetToken,
 ) -> Result<SessionStatus, String> {
+    start_session_with_token_claim(app, state, token, None)
+}
+
+fn start_claimed_session(
+    app: &AppHandle,
+    state: &AppSessionState,
+    token: TargetToken,
+    session_id: u64,
+) -> Result<SessionStatus, String> {
+    start_session_with_token_claim(app, state, token, Some(session_id))
+}
+
+fn start_session_with_token_claim(
+    app: &AppHandle,
+    state: &AppSessionState,
+    token: TargetToken,
+    claimed_session_id: Option<u64>,
+) -> Result<SessionStatus, String> {
     if token.is_secure {
+        if let Some(session_id) = claimed_session_id {
+            let _ = cancel_session_if_current(state, session_id);
+        }
         emit_transient(app, None, "rejected", "安全输入区域：未开始录音");
         return Err("secure_input_rejected".into());
     }
 
-    let effect = {
+    let effect = if let Some(session_id) = claimed_session_id {
+        let machine = state.machine.lock().map_err(|_| "session_lock_failed")?;
+        if machine.recording_session_id() != Some(session_id) {
+            drop(machine);
+            return status_from(state, "menu_session_stale".into());
+        }
+        SessionEffect::BeganRecording { session_id }
+    } else {
         let mut machine = state.machine.lock().map_err(|_| "session_lock_failed")?;
         machine.handle(SessionCommand::Start)
     };
 
     match effect {
         SessionEffect::BeganRecording { session_id } => {
+            let started_from_menu = is_menu_session(state, session_id);
             // Remember where the user was typing BEFORE mic TCC / overlay.
             if !commit_source_pid_if_current(state, session_id, spike::current_frontmost_pid()) {
                 let _ = cancel_session_if_current(state, session_id);
@@ -1627,6 +1784,12 @@ pub fn start_session_with_token(
             }
 
             if !state.hold_active.load(Ordering::SeqCst) {
+                if started_from_menu {
+                    eprintln!(
+                        "luozi: menu finish requested during mic open — stop session {session_id}"
+                    );
+                    return stop_session_if_current(app, state, Some(session_id));
+                }
                 eprintln!(
                     "luozi: hold released during mic open (likely TCC) — cancel session {session_id}"
                 );
@@ -1811,6 +1974,7 @@ fn stop_session_if_current(
             }
         };
 
+        prepare_cancel_state(state);
         let effect = machine.handle(SessionCommand::Stop {
             duration_ms: audio.duration_ms,
         });
@@ -1848,6 +2012,7 @@ pub fn stop_session(app: &AppHandle, state: &AppSessionState) -> Result<SessionS
 }
 
 pub fn cancel_session(app: &AppHandle, state: &AppSessionState) -> Result<SessionStatus, String> {
+    prepare_cancel_state(state);
     let session_id = state
         .machine
         .lock()
@@ -2181,6 +2346,146 @@ mod session_resource_tests {
             || called = true,
         ));
         assert!(called);
+    }
+}
+
+#[cfg(test)]
+mod menu_toggle_tests {
+    use super::{
+        decide_menu_toggle, prepare_cancel_state, recording_phase_copy, AppSessionState,
+        MenuToggleDecision, SessionCommand, SessionEffect, SessionIntent,
+    };
+    use std::sync::atomic::Ordering;
+
+    #[test]
+    fn idle_menu_action_claims_recording_and_sets_menu_hold() {
+        let state = AppSessionState::default();
+
+        assert_eq!(
+            decide_menu_toggle(&state, SessionIntent::Continue),
+            MenuToggleDecision::Start { session_id: 0 }
+        );
+        assert!(state.hold_active.load(Ordering::SeqCst));
+        assert!(state.menu_active.load(Ordering::SeqCst));
+        assert_eq!(
+            *state.menu_session_id.lock().expect("menu session lock"),
+            Some(0)
+        );
+        assert_eq!(
+            state
+                .machine
+                .lock()
+                .expect("machine lock")
+                .recording_session_id(),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn recording_menu_action_finishes_current_session_and_clears_menu_hold() {
+        let state = AppSessionState::default();
+        assert_eq!(
+            decide_menu_toggle(&state, SessionIntent::Continue),
+            MenuToggleDecision::Start { session_id: 0 }
+        );
+
+        assert_eq!(
+            decide_menu_toggle(&state, SessionIntent::Continue),
+            MenuToggleDecision::Finish { session_id: 0 }
+        );
+        assert!(!state.hold_active.load(Ordering::SeqCst));
+        assert!(!state.menu_active.load(Ordering::SeqCst));
+        assert_eq!(
+            state
+                .machine
+                .lock()
+                .expect("machine lock")
+                .recording_session_id(),
+            Some(0),
+            "finish decision leaves the owned recording for stop_session"
+        );
+    }
+
+    #[test]
+    fn cancel_clears_menu_hold_and_session_marker() {
+        let state = AppSessionState::default();
+        assert_eq!(
+            decide_menu_toggle(&state, SessionIntent::Continue),
+            MenuToggleDecision::Start { session_id: 0 }
+        );
+
+        prepare_cancel_state(&state);
+
+        assert!(!state.hold_active.load(Ordering::SeqCst));
+        assert!(!state.menu_active.load(Ordering::SeqCst));
+        assert_eq!(
+            *state.menu_session_id.lock().expect("menu session lock"),
+            None
+        );
+    }
+
+    #[test]
+    fn busy_menu_action_does_not_start_a_second_session() {
+        let state = AppSessionState::default();
+        let session_id = {
+            let mut machine = state.machine.lock().expect("machine lock");
+            let SessionEffect::BeganRecording { session_id } =
+                machine.handle(SessionCommand::Start)
+            else {
+                panic!("session should start");
+            };
+            assert!(matches!(
+                machine.handle(SessionCommand::Stop { duration_ms: 500 }),
+                SessionEffect::BeginTranscribe { .. }
+            ));
+            session_id
+        };
+
+        assert_eq!(
+            decide_menu_toggle(&state, SessionIntent::Continue),
+            MenuToggleDecision::RejectedBusy
+        );
+        assert_eq!(
+            state
+                .machine
+                .lock()
+                .expect("machine lock")
+                .active_session_id(),
+            Some(session_id)
+        );
+        assert!(!state.menu_active.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn menu_recording_copy_explains_toggle_completion() {
+        let state = AppSessionState::default();
+        assert_eq!(
+            decide_menu_toggle(&state, SessionIntent::Continue),
+            MenuToggleDecision::Start { session_id: 0 }
+        );
+
+        assert_eq!(
+            recording_phase_copy(&state, 0, false),
+            ("recording", "再次点击菜单完成 · Esc 取消".to_string())
+        );
+        assert_eq!(
+            recording_phase_copy(&state, 0, true),
+            ("recording_edit", "再次点击菜单完成 · Esc 取消".to_string())
+        );
+    }
+
+    #[test]
+    fn idle_voice_edit_claim_commits_intent_before_recording_is_visible() {
+        let state = AppSessionState::default();
+
+        assert_eq!(
+            decide_menu_toggle(&state, SessionIntent::VoiceEdit),
+            MenuToggleDecision::Start { session_id: 0 }
+        );
+        assert_eq!(
+            *state.intent.lock().expect("intent lock"),
+            SessionIntent::VoiceEdit
+        );
     }
 }
 

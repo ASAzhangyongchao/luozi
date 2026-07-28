@@ -317,19 +317,41 @@ fn build_tray(
             "draft" => show_draft(app),
             "settings" => show_settings(app, Some("general")),
             "about" => show_about(app),
-            "start" => with_session(app, |s| {
-                let _ = session::controller::start_continue_session(app, s);
-            }),
-            "voice_edit" => with_session(app, |s| {
-                if let Err(err) = session::controller::start_voice_edit_session(app, s) {
-                    if err != "draft_empty" {
-                        eprintln!("luozi: voice_edit start failed: {err}");
-                    }
-                }
-            }),
-            "cancel" => with_session(app, |s| {
-                let _ = session::controller::cancel_session(app, s);
-            }),
+            "start" => {
+                let app = app.clone();
+                std::thread::spawn(move || {
+                    with_session(&app, |s| {
+                        if let Err(err) = session::controller::toggle_continue_menu_session(&app, s)
+                        {
+                            if err != "session_busy" {
+                                eprintln!("luozi: tray continue toggle failed: {err}");
+                            }
+                        }
+                    });
+                });
+            }
+            "voice_edit" => {
+                let app = app.clone();
+                std::thread::spawn(move || {
+                    with_session(&app, |s| {
+                        if let Err(err) =
+                            session::controller::toggle_voice_edit_menu_session(&app, s)
+                        {
+                            if err != "draft_empty" && err != "session_busy" {
+                                eprintln!("luozi: tray voice-edit toggle failed: {err}");
+                            }
+                        }
+                    });
+                });
+            }
+            "cancel" => {
+                let app = app.clone();
+                std::thread::spawn(move || {
+                    with_session(&app, |s| {
+                        let _ = session::controller::cancel_session(&app, s);
+                    });
+                });
+            }
             "undo" => with_session(app, |s| {
                 let _ = session::controller::undo_last(app, s);
             }),

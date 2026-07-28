@@ -13,7 +13,7 @@
             <span class="rail-icon" aria-hidden="true">✎</span>
             <span class="rail-label">草稿</span>
           </button>
-          <button type="button" class="rail-item" data-nav="history" title="落字历史（即将推出）" disabled>
+          <button type="button" class="rail-item" id="btnRailHistory" data-nav="history" title="落字历史">
             <span class="rail-icon" aria-hidden="true">☰</span>
             <span class="rail-label">历史</span>
           </button>
@@ -35,9 +35,9 @@
       <header class="wb-toolbar">
         <div class="wb-brand">
           <img class="brand-mark" src="./assets/brand/luozi-mark.svg" width="28" height="28" alt="" />
-          <strong>语音草稿</strong>
+          <strong id="wbTitle">语音草稿</strong>
         </div>
-        <div class="wb-actions">
+        <div class="wb-actions" id="draftActions">
           <button type="button" id="btnUndo" title="撤销">撤销</button>
           <button type="button" id="btnRedo" title="重做">重做</button>
           <button type="button" id="btnCopy" class="primary-ghost">复制</button>
@@ -46,7 +46,7 @@
         </div>
       </header>
 
-      <main class="wb-body">
+      <main class="wb-body" id="draftPane">
         <textarea
           id="editor"
           spellcheck="true"
@@ -55,8 +55,14 @@
         <p id="saveHint" class="wb-hint" aria-live="polite"></p>
       </main>
 
+      <main class="wb-body history-pane" id="historyPane" hidden>
+        <p class="wb-hint history-meta">本机保存，最多 50 条；单条截断以节省空间。</p>
+        <div id="historyList" class="history-list" role="list"></div>
+        <p id="historyEmpty" class="wb-hint" hidden>还没有落字记录。说几句再回来看。</p>
+      </main>
+
       <footer class="wb-footer">
-        <p class="wb-hint">
+        <p class="wb-hint" id="draftFooterHint">
           按住 <kbd id="hotkeyHint">Control+Alt+Space</kbd> 继续说；
           按住 <kbd id="editHotkeyHint">Control+Alt+Shift+Space</kbd> 说修改要求。
         </p>

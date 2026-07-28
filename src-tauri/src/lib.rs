@@ -55,6 +55,19 @@ fn draft_load_last(draft: tauri::State<'_, DraftStore>) -> Result<DraftStateDto,
 }
 
 #[tauri::command]
+fn history_list(draft: tauri::State<'_, DraftStore>) -> Vec<session::HistoryItemDto> {
+    draft.history_list()
+}
+
+#[tauri::command]
+fn history_load_into_draft(
+    id: String,
+    draft: tauri::State<'_, DraftStore>,
+) -> Result<DraftStateDto, String> {
+    draft.load_history_into_draft(&id)
+}
+
+#[tauri::command]
 fn draft_insert(
     start: usize,
     end: usize,
@@ -711,6 +724,8 @@ pub fn run() {
             draft_redo,
             draft_clear,
             draft_load_last,
+            history_list,
+            history_load_into_draft,
             draft_insert,
             draft_set_selection,
             draft_apply_pending,

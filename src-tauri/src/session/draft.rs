@@ -9,6 +9,7 @@ use luozi_core::DraftDocument;
 use serde::{Deserialize, Serialize};
 
 use super::asr::APP_SUPPORT_DIR_NAME;
+use super::history::HistoryStore;
 
 const LAST_TTL: Duration = Duration::from_secs(10 * 60);
 
@@ -49,6 +50,7 @@ pub struct DraftStore {
     dirty: Mutex<bool>,
     selection: Mutex<Selection>,
     pending: Mutex<Option<PendingEdit>>,
+    history: HistoryStore,
 }
 
 impl Default for DraftStore {
@@ -60,6 +62,7 @@ impl Default for DraftStore {
             dirty: Mutex::new(false),
             selection: Mutex::new(Selection::default()),
             pending: Mutex::new(None),
+            history: HistoryStore::default(),
         }
     }
 }
@@ -205,6 +208,32 @@ impl DraftStore {
                 at: Instant::now(),
             });
         }
+        self.history.push(t);
+    }
+
+    pub fn history_list(&self) -> Vec<super::history::HistoryItemDto> {
+        self.history.list()
+    }
+
+    pub fn load_history_into_draft(&self, id: &str) -> Result<DraftStateDto, String> {
+        let Some(item) = self.history.get(id) else {
+            return Err("history_item_missing".into());
+        };
+        {
+            let mut doc = self.doc.lock().map_err(|_| "draft_lock_failed")?;
+            if doc.text().trim().is_empty() {
+                doc.apply(item.text);
+            } else {
+                let mut next = doc.text().to_string();
+                if !next.ends_with('\n') {
+                    next.push('\n');
+                }
+                next.push_str(&item.text);
+                doc.apply(next);
+            }
+        }
+        self.flush()?;
+        Ok(self.snapshot())
     }
 
     pub fn take_last_transcript(&self) -> Option<String> {

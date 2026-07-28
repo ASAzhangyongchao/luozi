@@ -395,6 +395,64 @@ code {
   background: color-mix(in srgb, var(--aurora-cyan) 10%, transparent);
 }
 
+.history-pane {
+  overflow: auto;
+  padding-bottom: 16px;
+}
+
+.history-meta {
+  margin: 0 0 10px;
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.history-item {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: #fff;
+}
+
+.history-item-meta {
+  font-size: 0.78rem;
+  color: var(--content-muted);
+  margin-bottom: 6px;
+}
+
+.history-item-text {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--night-teal);
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.history-item-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.history-item-actions button {
+  appearance: none;
+  border: 1px solid var(--control-border);
+  background: var(--control-glass);
+  color: var(--night-teal);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.history-item-actions .primary-ghost {
+  border-color: color-mix(in srgb, var(--aurora-cyan) 40%, transparent);
+}
+
 .spike-panel {
   margin: 16px;
   padding: 12px;

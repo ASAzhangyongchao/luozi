@@ -658,7 +658,7 @@ fn apply_voice_edit(app: &AppHandle, _state: &AppSessionState, cfg: &AppConfig, 
     }
 
     emit_phase(app, "transcribing", "正在修改…");
-    show_overlay(app, true);
+    show_overlay_ex(app, true, false);
 
     let proposed = match super::text_ai::rewrite_scope(&cfg.text_ai, instruction, &original) {
         Ok(p) => p,

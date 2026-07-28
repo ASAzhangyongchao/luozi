@@ -51,6 +51,27 @@ enum SessionInputSource {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ShortcutStartRetryDecision {
+    WaitForPreviousGeneration,
+    RejectBusy,
+}
+
+fn retry_shortcut_start_decision(
+    active_source: Option<SessionInputSource>,
+    new_token: ShortcutHoldToken,
+) -> ShortcutStartRetryDecision {
+    match active_source {
+        Some(SessionInputSource::Shortcut(old_token))
+            if old_token.intent == new_token.intent
+                && old_token.generation != new_token.generation =>
+        {
+            ShortcutStartRetryDecision::WaitForPreviousGeneration
+        }
+        _ => ShortcutStartRetryDecision::RejectBusy,
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ShortcutStartPlan {
     intent: SessionIntent,
     source: SessionInputSource,
@@ -201,6 +222,12 @@ impl ShortcutHoldSlot {
                 && state.active
                 && state.owner_session_id == Some(session_id)
         })
+    }
+
+    fn is_current_active(&self, token: ShortcutHoldToken) -> bool {
+        self.slot(token.intent)
+            .lock()
+            .is_ok_and(|state| state.generation == token.generation && state.active)
     }
 
     fn clear_owner(&self, token: ShortcutHoldToken, session_id: u64) -> bool {
@@ -644,6 +671,15 @@ fn claim_shortcut_session_with_token(
         hold.owner_session_id = Some(session_id);
         Ok(SessionEffect::BeganRecording { session_id })
     } else {
+        let active_source = machine
+            .active_session_id()
+            .and_then(|session_id| intent.source(session_id));
+        if hold.active
+            && retry_shortcut_start_decision(active_source, token)
+                == ShortcutStartRetryDecision::WaitForPreviousGeneration
+        {
+            return Err("shortcut_repress_wait".into());
+        }
         Ok(effect)
     }
 }
@@ -735,6 +771,47 @@ fn session_input_is_active(state: &AppSessionState, session_id: u64) -> bool {
         Some(SessionInputSource::Direct) => state.hold_active.load(Ordering::SeqCst),
         None => false,
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ShortcutHandoffPoll {
+    RetryNow,
+    KeepWaiting,
+    Canceled,
+}
+
+fn shortcut_handoff_poll(state: &AppSessionState, token: ShortcutHoldToken) -> ShortcutHandoffPoll {
+    if !state.shortcut_holds.is_current_active(token) {
+        return ShortcutHandoffPoll::Canceled;
+    }
+    let busy = state
+        .machine
+        .lock()
+        .ok()
+        .is_some_and(|machine| machine.active_session_id().is_some());
+    if busy {
+        ShortcutHandoffPoll::KeepWaiting
+    } else {
+        ShortcutHandoffPoll::RetryNow
+    }
+}
+
+fn wait_for_shortcut_handoff(
+    state: &AppSessionState,
+    token: ShortcutHoldToken,
+) -> Result<(), String> {
+    const POLL_MS: u64 = 25;
+    const TIMEOUT_MS: u64 = TRANSCRIBE_WATCHDOG_MS + 5_000;
+    for _ in 0..(TIMEOUT_MS / POLL_MS) {
+        match shortcut_handoff_poll(state, token) {
+            ShortcutHandoffPoll::RetryNow => return Ok(()),
+            ShortcutHandoffPoll::KeepWaiting => {
+                std::thread::sleep(std::time::Duration::from_millis(POLL_MS));
+            }
+            ShortcutHandoffPoll::Canceled => return Err("shortcut_released".into()),
+        }
+    }
+    Err("shortcut_handoff_timeout".into())
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -2049,7 +2126,21 @@ pub fn start_shortcut_session(
     let plan = shortcut_start_plan(token);
     // HARD RULE: never wait on Accessibility before opening the mic.
     // Capture runs in the background; deliver path falls back to clipboard+⌘V.
-    start_session_with_token_claim(app, state, dummy_token(), None, plan.intent, plan.source)
+    loop {
+        match start_session_with_token_claim(
+            app,
+            state,
+            dummy_token(),
+            None,
+            plan.intent,
+            plan.source,
+        ) {
+            Err(err) if err == "shortcut_repress_wait" => {
+                wait_for_shortcut_handoff(state, token)?;
+            }
+            result => return result,
+        }
+    }
 }
 
 pub fn start_session_with_token(
@@ -2927,11 +3018,12 @@ mod session_resource_tests {
 #[cfg(test)]
 mod menu_toggle_tests {
     use super::{
-        cancel_session_if_current, claim_shortcut_session_with_token, decide_menu_toggle,
-        note_hold_pressed, note_hold_released, recording_phase_copy, session_input_is_active,
-        session_input_source_for, session_intent_for, shortcut_start_plan, AppSessionState,
+        cancel_session_if_current, claim_shortcut_session_with_token, clear_session_intent,
+        decide_menu_toggle, note_hold_pressed, note_hold_released, recording_phase_copy,
+        retry_shortcut_start_decision, session_input_is_active, session_input_source_for,
+        session_intent_for, shortcut_handoff_poll, shortcut_start_plan, AppSessionState,
         MenuToggleDecision, SessionCommand, SessionEffect, SessionInputSource, SessionIntent,
-        ShortcutHoldToken,
+        ShortcutHandoffPoll, ShortcutHoldToken, ShortcutStartRetryDecision,
     };
     use std::sync::atomic::Ordering;
 
@@ -3189,15 +3281,70 @@ mod menu_toggle_tests {
         assert_eq!(old_release.session_id, old_session_id);
 
         let new_token = note_hold_pressed(&state, SessionIntent::Continue);
+        assert_eq!(
+            claim_shortcut_session_with_token(&state, new_token),
+            Err("shortcut_repress_wait".into()),
+        );
+        assert_eq!(
+            shortcut_handoff_poll(&state, new_token),
+            ShortcutHandoffPoll::KeepWaiting,
+        );
+        assert!(matches!(
+            state
+                .machine
+                .lock()
+                .expect("machine lock")
+                .handle(SessionCommand::Stop { duration_ms: 500 }),
+            SessionEffect::BeginTranscribe { session_id } if session_id == old_session_id
+        ));
+        assert!(clear_session_intent(&state, old_session_id));
+        assert_eq!(
+            shortcut_handoff_poll(&state, new_token),
+            ShortcutHandoffPoll::KeepWaiting,
+            "transcribing remains busy even after the old source is consumed",
+        );
         assert!(cancel_session_if_current(&state, old_session_id));
 
         assert!(state.hold_active.load(Ordering::SeqCst));
+        assert_eq!(
+            shortcut_handoff_poll(&state, new_token),
+            ShortcutHandoffPoll::RetryNow,
+        );
         let new_session_id = claim_shortcut(&state, new_token);
         assert!(session_input_is_active(&state, new_session_id));
         assert_ne!(
             session_input_source_for(&state, new_session_id),
             Some(SessionInputSource::Shortcut(old_release.token)),
             "the old release cannot own or stop generation 2",
+        );
+    }
+
+    #[test]
+    fn rapid_repress_release_during_handoff_does_not_claim() {
+        let state = AppSessionState::default();
+        let old_token = note_hold_pressed(&state, SessionIntent::Continue);
+        let old_session_id = claim_shortcut(&state, old_token);
+        note_hold_released(&state, SessionIntent::Continue).expect("old release owner");
+
+        let new_token = note_hold_pressed(&state, SessionIntent::Continue);
+        assert_eq!(
+            claim_shortcut_session_with_token(&state, new_token),
+            Err("shortcut_repress_wait".into()),
+        );
+        assert_eq!(note_hold_released(&state, SessionIntent::Continue), None);
+        assert!(cancel_session_if_current(&state, old_session_id));
+
+        assert_eq!(
+            shortcut_handoff_poll(&state, new_token),
+            ShortcutHandoffPoll::Canceled,
+        );
+        assert_eq!(
+            state
+                .machine
+                .lock()
+                .expect("machine lock")
+                .recording_session_id(),
+            None,
         );
     }
 
@@ -3213,6 +3360,53 @@ mod menu_toggle_tests {
 
         let voice_session_id = claim_shortcut(&state, voice_token);
         assert!(session_input_is_active(&state, voice_session_id));
+    }
+
+    #[test]
+    fn rapid_repress_waits_only_for_an_older_generation_of_the_same_shortcut() {
+        let old_continue = ShortcutHoldToken {
+            intent: SessionIntent::Continue,
+            generation: 1,
+        };
+        let new_continue = ShortcutHoldToken {
+            intent: SessionIntent::Continue,
+            generation: 2,
+        };
+        assert_eq!(
+            retry_shortcut_start_decision(
+                Some(SessionInputSource::Shortcut(old_continue)),
+                new_continue,
+            ),
+            ShortcutStartRetryDecision::WaitForPreviousGeneration,
+        );
+        assert_eq!(
+            retry_shortcut_start_decision(
+                Some(SessionInputSource::Shortcut(new_continue)),
+                new_continue,
+            ),
+            ShortcutStartRetryDecision::RejectBusy,
+        );
+        assert_eq!(
+            retry_shortcut_start_decision(
+                Some(SessionInputSource::Menu(SessionIntent::Continue)),
+                new_continue,
+            ),
+            ShortcutStartRetryDecision::RejectBusy,
+        );
+        assert_eq!(
+            retry_shortcut_start_decision(
+                Some(SessionInputSource::Shortcut(ShortcutHoldToken {
+                    intent: SessionIntent::VoiceEdit,
+                    generation: 1,
+                })),
+                new_continue,
+            ),
+            ShortcutStartRetryDecision::RejectBusy,
+        );
+        assert_eq!(
+            retry_shortcut_start_decision(Some(SessionInputSource::Direct), new_continue),
+            ShortcutStartRetryDecision::RejectBusy,
+        );
     }
 }
 

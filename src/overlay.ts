@@ -1,35 +1,46 @@
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import avatarSvg from "./assets/luozi-orbit-avatar.svg?raw";
+import {
+  initialHudState,
+  reduceHudState,
+  type HudEnergyEvent,
+  type HudPhaseEvent,
+} from "./overlay-model";
 import "./overlay.css";
 
-const label = document.querySelector(".label");
-const root = document.querySelector(".overlay");
+const root = document.querySelector<HTMLElement>(".overlay")!;
+const avatar = document.querySelector<HTMLElement>("#avatar")!;
+const title = document.querySelector<HTMLElement>(".title")!;
+const detail = document.querySelector<HTMLElement>(".detail")!;
 
-/** Phases that keep the HUD up until the session ends. */
-const STICKY = new Set(["recording", "recording_edit", "transcribing", "delivering"]);
-const AUTO_HIDE_MS = 2200;
+let state = initialHudState;
+avatar.innerHTML = avatarSvg;
 
-let hideTimer: ReturnType<typeof setTimeout> | undefined;
+function render() {
+  root.dataset.state = state.kind;
+  title.textContent = state.title;
+  detail.textContent = state.detail;
+  detail.hidden = state.detail.length === 0;
 
-function setPhase(phase: string, message: string) {
-  if (!label || !root) return;
-  label.textContent = message || phase;
-  root.setAttribute("data-phase", phase);
+  const svg = avatar.querySelector<SVGElement>("svg");
+  const energy = state.energy;
+  svg?.style.setProperty("--energy", energy.toFixed(3));
+  svg?.style.setProperty("--orbit-dash", `${(0.18 + energy * 0.42).toFixed(3)} 1`);
+  svg?.style.setProperty("--orbit-opacity", (0.28 + energy * 0.72).toFixed(3));
+  svg?.style.setProperty(
+    "--orbit-back-opacity",
+    (0.18 + energy * 0.46).toFixed(3),
+  );
 }
 
-function scheduleAutoHide(phase: string) {
-  if (hideTimer !== undefined) {
-    clearTimeout(hideTimer);
-    hideTimer = undefined;
-  }
-  if (STICKY.has(phase)) return;
-  hideTimer = setTimeout(() => {
-    void getCurrentWindow().hide();
-  }, AUTO_HIDE_MS);
-}
+void listen<HudPhaseEvent>("session://phase", (event) => {
+  state = reduceHudState(state, event.payload);
+  render();
+});
 
-listen<{ phase: string; message: string }>("session://phase", (event) => {
-  const { phase, message } = event.payload;
-  setPhase(phase, message);
-  scheduleAutoHide(phase);
-}).catch(console.error);
+void listen<HudEnergyEvent>("session://energy", (event) => {
+  state = reduceHudState(state, event.payload);
+  render();
+});
+
+render();

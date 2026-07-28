@@ -30,6 +30,46 @@ pub enum SessionIntent {
     VoiceEdit,
 }
 
+struct OwnedSessionResource<T> {
+    resource: T,
+    owner_session_id: Option<u64>,
+}
+
+impl<T> OwnedSessionResource<T> {
+    fn new(resource: T) -> Self {
+        Self {
+            resource,
+            owner_session_id: None,
+        }
+    }
+
+    fn bind_owner(&mut self, session_id: u64) {
+        self.owner_session_id = Some(session_id);
+    }
+
+    fn owner_session_id(&self) -> Option<u64> {
+        self.owner_session_id
+    }
+
+    fn resource_mut(&mut self) -> &mut T {
+        &mut self.resource
+    }
+
+    #[cfg(test)]
+    fn resource(&self) -> &T {
+        &self.resource
+    }
+
+    fn cleanup_if_owned(&mut self, session_id: u64, cleanup: impl FnOnce(&mut T)) -> bool {
+        if self.owner_session_id != Some(session_id) {
+            return false;
+        }
+        cleanup(&mut self.resource);
+        self.owner_session_id = None;
+        true
+    }
+}
+
 /// Whisper + deliver must not hang the session forever (stuck busy overlay).
 const TRANSCRIBE_WATCHDOG_MS: u64 = 45_000;
 
@@ -148,10 +188,32 @@ fn cleanup_session_resources_locked(
     prepare_cancel_state(state);
     state.energy_session.deactivate(session_id);
     if let Ok(mut recorder) = state.recorder.lock() {
-        recorder.cancel();
+        recorder.cleanup_if_owned(session_id, SessionRecorder::cancel);
     }
     let _ = state.source_target.lock().map(|mut target| *target = None);
     let _ = state.source_pid.lock().map(|mut pid| *pid = None);
+}
+
+fn cleanup_stale_recorder_after_start(state: &AppSessionState, session_id: u64) -> bool {
+    let Ok(machine) = state.machine.lock() else {
+        return false;
+    };
+    if machine.recording_session_id() == Some(session_id) {
+        return false;
+    }
+    let Ok(mut recorder) = state.recorder.lock() else {
+        return false;
+    };
+    recorder.cleanup_if_owned(session_id, SessionRecorder::cancel)
+}
+
+fn recording_session_is_current(state: &AppSessionState, session_id: u64) -> bool {
+    state
+        .machine
+        .lock()
+        .ok()
+        .and_then(|machine| machine.recording_session_id())
+        == Some(session_id)
 }
 
 fn cancel_session_if_current(state: &AppSessionState, session_id: u64) -> bool {
@@ -285,7 +347,7 @@ fn disarm_escape(_app: &AppHandle) {
 
 pub struct AppSessionState {
     pub machine: Mutex<SessionMachine>,
-    pub recorder: Mutex<SessionRecorder>,
+    recorder: Mutex<OwnedSessionResource<SessionRecorder>>,
     pub clipboard: Mutex<ClipboardGate>,
     pub source_target: Mutex<Option<TargetToken>>,
     /// Lazy-loaded Whisper context (M3).
@@ -317,7 +379,7 @@ impl Default for AppSessionState {
     fn default() -> Self {
         Self {
             machine: Mutex::new(SessionMachine::new()),
-            recorder: Mutex::new(SessionRecorder::new()),
+            recorder: Mutex::new(OwnedSessionResource::new(SessionRecorder::new())),
             clipboard: Mutex::new(ClipboardGate::default()),
             source_target: Mutex::new(None),
             asr: Mutex::new(None),
@@ -343,6 +405,30 @@ enum MenuToggleDecision {
     RejectedBusy,
 }
 
+fn claim_session_with_intent_locked(
+    state: &AppSessionState,
+    machine: &mut SessionMachine,
+    start_intent: SessionIntent,
+) -> Result<SessionEffect, String> {
+    let effect = machine.handle(SessionCommand::Start);
+    if matches!(effect, SessionEffect::BeganRecording { .. }) {
+        let Ok(mut intent) = state.intent.lock() else {
+            let _ = machine.handle(SessionCommand::Cancel);
+            return Err("intent_lock_failed".into());
+        };
+        *intent = start_intent;
+    }
+    Ok(effect)
+}
+
+fn claim_session_with_intent(
+    state: &AppSessionState,
+    start_intent: SessionIntent,
+) -> Result<SessionEffect, String> {
+    let mut machine = state.machine.lock().map_err(|_| "session_lock_failed")?;
+    claim_session_with_intent_locked(state, &mut machine, start_intent)
+}
+
 fn decide_menu_toggle(state: &AppSessionState, start_intent: SessionIntent) -> MenuToggleDecision {
     let Ok(mut machine) = state.machine.lock() else {
         return MenuToggleDecision::RejectedBusy;
@@ -350,20 +436,15 @@ fn decide_menu_toggle(state: &AppSessionState, start_intent: SessionIntent) -> M
 
     match machine.phase() {
         SessionPhase::Idle => {
-            let SessionEffect::BeganRecording { session_id } =
-                machine.handle(SessionCommand::Start)
+            let Ok(SessionEffect::BeganRecording { session_id }) =
+                claim_session_with_intent_locked(state, &mut machine, start_intent)
             else {
-                return MenuToggleDecision::RejectedBusy;
-            };
-            let Ok(mut intent) = state.intent.lock() else {
-                let _ = machine.handle(SessionCommand::Cancel);
                 return MenuToggleDecision::RejectedBusy;
             };
             let Ok(mut menu_session_id) = state.menu_session_id.lock() else {
                 let _ = machine.handle(SessionCommand::Cancel);
                 return MenuToggleDecision::RejectedBusy;
             };
-            *intent = start_intent;
             *menu_session_id = Some(session_id);
             state.menu_active.store(true, Ordering::SeqCst);
             state.hold_active.store(true, Ordering::SeqCst);
@@ -1131,21 +1212,13 @@ pub fn start_voice_edit_session(
     state: &AppSessionState,
 ) -> Result<SessionStatus, String> {
     prepare_voice_edit(app)?;
-    let _ = state
-        .intent
-        .lock()
-        .map(|mut g| *g = SessionIntent::VoiceEdit);
-    start_session(app, state)
+    start_session_for_intent(app, state, SessionIntent::VoiceEdit)
 }
 
 pub fn start_continue_session(
     app: &AppHandle,
     state: &AppSessionState,
 ) -> Result<SessionStatus, String> {
-    let _ = state
-        .intent
-        .lock()
-        .map(|mut g| *g = SessionIntent::Continue);
     start_session(app, state)
 }
 
@@ -1711,9 +1784,17 @@ pub fn warmup_microphone_async() {
 }
 
 pub fn start_session(app: &AppHandle, state: &AppSessionState) -> Result<SessionStatus, String> {
+    start_session_with_token(app, state, dummy_token())
+}
+
+fn start_session_for_intent(
+    app: &AppHandle,
+    state: &AppSessionState,
+    intent: SessionIntent,
+) -> Result<SessionStatus, String> {
     // HARD RULE: never wait on Accessibility before opening the mic.
     // Capture runs in the background; deliver path falls back to clipboard+⌘V.
-    start_session_with_token(app, state, dummy_token())
+    start_session_with_token_claim(app, state, dummy_token(), None, intent)
 }
 
 pub fn start_session_with_token(
@@ -1721,7 +1802,7 @@ pub fn start_session_with_token(
     state: &AppSessionState,
     token: TargetToken,
 ) -> Result<SessionStatus, String> {
-    start_session_with_token_claim(app, state, token, None)
+    start_session_with_token_claim(app, state, token, None, SessionIntent::Continue)
 }
 
 fn start_claimed_session(
@@ -1730,7 +1811,7 @@ fn start_claimed_session(
     token: TargetToken,
     session_id: u64,
 ) -> Result<SessionStatus, String> {
-    start_session_with_token_claim(app, state, token, Some(session_id))
+    start_session_with_token_claim(app, state, token, Some(session_id), SessionIntent::Continue)
 }
 
 fn start_session_with_token_claim(
@@ -1738,6 +1819,7 @@ fn start_session_with_token_claim(
     state: &AppSessionState,
     token: TargetToken,
     claimed_session_id: Option<u64>,
+    start_intent: SessionIntent,
 ) -> Result<SessionStatus, String> {
     if token.is_secure {
         if let Some(session_id) = claimed_session_id {
@@ -1755,8 +1837,7 @@ fn start_session_with_token_claim(
         }
         SessionEffect::BeganRecording { session_id }
     } else {
-        let mut machine = state.machine.lock().map_err(|_| "session_lock_failed")?;
-        machine.handle(SessionCommand::Start)
+        claim_session_with_intent(state, start_intent)?
     };
 
     match effect {
@@ -1773,7 +1854,13 @@ fn start_session_with_token_claim(
             // Mic open can block on first-run TCC. Do not leave「听写中」if the user
             // already released during that dialog (hold_active cleared on Released).
             let start_result = match state.recorder.lock() {
-                Ok(mut recorder) => recorder.start(energy_sink),
+                Ok(mut recorder) => {
+                    let result = recorder.resource_mut().start(energy_sink);
+                    if result.is_ok() {
+                        recorder.bind_owner(session_id);
+                    }
+                    result
+                }
                 Err(_) => Err("recorder_lock_failed".to_string()),
             };
             if let Err(err) = start_result {
@@ -1781,6 +1868,12 @@ fn start_session_with_token_claim(
                     emit_transient(app, Some(session_id), "error", &err);
                 }
                 return Err(err);
+            }
+
+            if cleanup_stale_recorder_after_start(state, session_id)
+                || !recording_session_is_current(state, session_id)
+            {
+                return status_from(state, "canceled_during_microphone_open".into());
             }
 
             if !state.hold_active.load(Ordering::SeqCst) {
@@ -1953,8 +2046,14 @@ fn stop_session_if_current(
         state.energy_session.deactivate(session_id);
         let stop_result = match state.recorder.lock() {
             Ok(mut recorder) => {
-                let _elapsed_ms = recorder.elapsed_ms();
-                recorder.stop()
+                if recorder.owner_session_id() != Some(session_id) {
+                    Err("not_recording".to_string())
+                } else {
+                    let _elapsed_ms = recorder.resource_mut().elapsed_ms();
+                    let result = recorder.resource_mut().stop();
+                    recorder.cleanup_if_owned(session_id, SessionRecorder::cancel);
+                    result
+                }
             }
             Err(_) => Err("recorder_lock_failed".to_string()),
         };
@@ -2215,10 +2314,17 @@ mod hud_tests {
 #[cfg(test)]
 mod session_resource_tests {
     use super::{
-        cancel_session_if_current, commit_capture_if_current, dummy_token,
-        with_recording_session_if_current, AppSessionState, SessionCommand, SessionEffect,
+        cancel_session_if_current, claim_session_with_intent, cleanup_stale_recorder_after_start,
+        commit_capture_if_current, decide_menu_toggle, dummy_token,
+        with_recording_session_if_current, AppSessionState, MenuToggleDecision,
+        OwnedSessionResource, SessionCommand, SessionEffect, SessionIntent,
     };
     use std::sync::atomic::Ordering;
+
+    #[derive(Default)]
+    struct FakeRecorder {
+        cancel_count: usize,
+    }
 
     fn begin_session(state: &AppSessionState) -> u64 {
         let effect = state
@@ -2346,6 +2452,124 @@ mod session_resource_tests {
             || called = true,
         ));
         assert!(called);
+    }
+
+    #[test]
+    fn stale_old_owner_is_canceled_and_cleared() {
+        let mut recorder = OwnedSessionResource::new(FakeRecorder::default());
+        recorder.bind_owner(7);
+
+        assert!(recorder.cleanup_if_owned(7, |recorder| {
+            recorder.cancel_count += 1;
+        }));
+        assert_eq!(recorder.owner_session_id(), None);
+        assert_eq!(recorder.resource().cancel_count, 1);
+    }
+
+    #[test]
+    fn old_cleanup_cannot_cancel_new_owner() {
+        let mut recorder = OwnedSessionResource::new(FakeRecorder::default());
+        recorder.bind_owner(8);
+
+        assert!(!recorder.cleanup_if_owned(7, |recorder| {
+            recorder.cancel_count += 1;
+        }));
+        assert_eq!(recorder.owner_session_id(), Some(8));
+        assert_eq!(recorder.resource().cancel_count, 0);
+    }
+
+    #[test]
+    fn cancel_before_microphone_open_cleans_late_recorder_owner() {
+        let state = AppSessionState::default();
+        let session_id =
+            match claim_session_with_intent(&state, SessionIntent::Continue).expect("claim") {
+                SessionEffect::BeganRecording { session_id } => session_id,
+                other => panic!("expected recording, got {other:?}"),
+            };
+        assert!(cancel_session_if_current(&state, session_id));
+
+        state
+            .recorder
+            .lock()
+            .expect("recorder lock")
+            .bind_owner(session_id);
+
+        assert!(cleanup_stale_recorder_after_start(&state, session_id));
+        assert_eq!(
+            state
+                .recorder
+                .lock()
+                .expect("recorder lock")
+                .owner_session_id(),
+            None
+        );
+    }
+
+    #[test]
+    fn menu_finish_before_microphone_open_cleans_late_recorder_owner() {
+        let state = AppSessionState::default();
+        let MenuToggleDecision::Start { session_id } =
+            decide_menu_toggle(&state, SessionIntent::Continue)
+        else {
+            panic!("menu should claim recording");
+        };
+        assert_eq!(
+            decide_menu_toggle(&state, SessionIntent::Continue),
+            MenuToggleDecision::Finish { session_id }
+        );
+
+        assert!(cancel_session_if_current(&state, session_id));
+        state
+            .recorder
+            .lock()
+            .expect("recorder lock")
+            .bind_owner(session_id);
+
+        assert!(cleanup_stale_recorder_after_start(&state, session_id));
+        assert_eq!(
+            state
+                .recorder
+                .lock()
+                .expect("recorder lock")
+                .owner_session_id(),
+            None
+        );
+    }
+
+    #[test]
+    fn busy_continue_does_not_overwrite_active_voice_edit_intent() {
+        let state = AppSessionState::default();
+
+        assert!(matches!(
+            claim_session_with_intent(&state, SessionIntent::VoiceEdit).expect("voice-edit claim"),
+            SessionEffect::BeganRecording { .. }
+        ));
+        assert_eq!(
+            claim_session_with_intent(&state, SessionIntent::Continue).expect("busy claim"),
+            SessionEffect::RejectedBusy
+        );
+        assert_eq!(
+            *state.intent.lock().expect("intent lock"),
+            SessionIntent::VoiceEdit
+        );
+    }
+
+    #[test]
+    fn busy_voice_edit_does_not_overwrite_active_continue_intent() {
+        let state = AppSessionState::default();
+
+        assert!(matches!(
+            claim_session_with_intent(&state, SessionIntent::Continue).expect("continue claim"),
+            SessionEffect::BeganRecording { .. }
+        ));
+        assert_eq!(
+            claim_session_with_intent(&state, SessionIntent::VoiceEdit).expect("busy claim"),
+            SessionEffect::RejectedBusy
+        );
+        assert_eq!(
+            *state.intent.lock().expect("intent lock"),
+            SessionIntent::Continue
+        );
     }
 }
 

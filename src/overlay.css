@@ -30,10 +30,11 @@ body {
   box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: 14px;
+  justify-content: space-between;
+  gap: 12px;
   width: 100%;
   height: 100%;
-  padding: 0 22px;
+  padding: 0 14px;
   border: 1px solid color-mix(in srgb, var(--ice-white) 20%, transparent);
   border-radius: 999px;
   background: var(--night-teal);
@@ -42,6 +43,108 @@ body {
   font-size: 0.95rem;
   letter-spacing: 0.02em;
   box-shadow: 0 8px 24px color-mix(in srgb, #000 28%, transparent);
+}
+
+.overlay.interactive {
+  padding: 0 12px;
+}
+
+.hud-mid {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+  justify-content: center;
+}
+
+.hud-btn {
+  appearance: none;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.hud-btn svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+.hud-cancel {
+  background: color-mix(in srgb, var(--ice-white) 16%, transparent);
+  color: var(--ice-white);
+}
+
+.hud-cancel:hover {
+  background: color-mix(in srgb, var(--ice-white) 28%, transparent);
+}
+
+.hud-confirm {
+  background: var(--ice-white);
+  color: var(--night-teal);
+}
+
+.hud-confirm:hover {
+  background: color-mix(in srgb, var(--aurora-cyan) 35%, var(--ice-white));
+}
+
+.wave {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 22px;
+}
+
+.wave span {
+  display: block;
+  width: 3px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--aurora-cyan);
+  animation: wave-bounce 0.9s ease-in-out infinite;
+}
+
+.wave span:nth-child(1) {
+  animation-delay: 0s;
+}
+.wave span:nth-child(2) {
+  animation-delay: 0.08s;
+}
+.wave span:nth-child(3) {
+  animation-delay: 0.16s;
+}
+.wave span:nth-child(4) {
+  animation-delay: 0.24s;
+  height: 14px;
+}
+.wave span:nth-child(5) {
+  animation-delay: 0.16s;
+}
+.wave span:nth-child(6) {
+  animation-delay: 0.08s;
+}
+.wave span:nth-child(7) {
+  animation-delay: 0s;
+}
+
+@keyframes wave-bounce {
+  0%,
+  100% {
+    transform: scaleY(0.45);
+    opacity: 0.65;
+  }
+  50% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
 }
 
 .mark {
@@ -75,6 +178,8 @@ body {
   white-space: nowrap;
   user-select: none;
   -webkit-user-select: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .pulse {
@@ -87,8 +192,13 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pulse {
+  .pulse,
+  .wave span {
     animation: none;
+  }
+  .wave span {
+    transform: none;
+    opacity: 0.9;
   }
 }
 
@@ -109,7 +219,8 @@ body {
   border-color: color-mix(in srgb, var(--electric-blue) 55%, transparent);
 }
 .overlay[data-phase="recording_edit"] .pulse,
-.overlay[data-phase="recording_edit"] .mark .dot {
+.overlay[data-phase="recording_edit"] .mark .dot,
+.overlay[data-phase="recording_edit"] .wave span {
   background: var(--electric-blue);
   fill: var(--electric-blue);
 }
@@ -119,6 +230,9 @@ body {
 .overlay[data-phase="recording_edit"] .pulse {
   box-shadow: 0 0 0 0 color-mix(in srgb, var(--electric-blue) 55%, transparent);
   animation-name: edit-pulse;
+}
+.overlay[data-phase="recording_edit"] .hud-confirm {
+  color: color-mix(in srgb, var(--electric-blue) 35%, var(--night-teal));
 }
 
 @keyframes edit-pulse {

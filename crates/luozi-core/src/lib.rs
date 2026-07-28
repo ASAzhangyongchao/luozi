@@ -7,6 +7,7 @@ mod engine;
 mod providers;
 mod session;
 mod text_edit;
+mod voice_energy;
 
 pub use config::{
     url_host, AppConfig, AsrMode, CloudAsrConfig, TextAiConfig, DEFAULT_SCHEMA_VERSION,
@@ -27,3 +28,4 @@ pub use text_edit::{
     assess_edit_risk, extract_protected_spans, resolve_edit_scope, EditRisk, EditScope,
     EditScopeKind,
 };
+pub use voice_energy::{measure_levels, EnergyThrottle, VoiceEnergyMeter};

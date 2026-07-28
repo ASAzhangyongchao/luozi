@@ -286,7 +286,12 @@ impl DraftStore {
         Ok(())
     }
 
-    pub fn insert_at(&self, start: usize, end: usize, chunk: &str) -> Result<DraftStateDto, String> {
+    pub fn insert_at(
+        &self,
+        start: usize,
+        end: usize,
+        chunk: &str,
+    ) -> Result<DraftStateDto, String> {
         {
             let mut doc = self.doc.lock().map_err(|_| "draft_lock_failed")?;
             doc.replace_range(start, end, chunk)?;

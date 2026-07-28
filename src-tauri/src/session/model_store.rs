@@ -44,7 +44,11 @@ pub fn recommended_model() -> Result<ModelEntry, String> {
     m.models
         .into_iter()
         .find(|e| e.recommended)
-        .or_else(|| load_manifest().ok().and_then(|x| x.models.into_iter().next()))
+        .or_else(|| {
+            load_manifest()
+                .ok()
+                .and_then(|x| x.models.into_iter().next())
+        })
         .ok_or_else(|| "model_manifest_empty".into())
 }
 
@@ -185,7 +189,12 @@ where
     Ok(dest)
 }
 
-fn download_to<F>(url: &str, dest: &Path, expected_bytes: u64, on_progress: &mut F) -> Result<(), String>
+fn download_to<F>(
+    url: &str,
+    dest: &Path,
+    expected_bytes: u64,
+    on_progress: &mut F,
+) -> Result<(), String>
 where
     F: FnMut(u8, &str),
 {

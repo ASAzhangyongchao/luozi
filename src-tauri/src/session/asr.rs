@@ -228,6 +228,9 @@ mod tests {
     #[test]
     fn default_model_path_ends_with_ggml_small() {
         let p = default_model_path();
-        assert_eq!(p.file_name().and_then(|s| s.to_str()), Some(MODEL_FILE_NAME));
+        assert_eq!(
+            p.file_name().and_then(|s| s.to_str()),
+            Some(MODEL_FILE_NAME)
+        );
     }
 }

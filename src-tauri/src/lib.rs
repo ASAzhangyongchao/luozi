@@ -3,8 +3,8 @@ mod spike;
 
 use luozi_core::AppConfig;
 use session::{
-    session_cancel, session_start, session_status, session_stop, session_undo_last, AppSessionState,
-    DraftStateDto, DraftStore,
+    session_cancel, session_start, session_status, session_stop, session_undo_last,
+    AppSessionState, DraftStateDto, DraftStore,
 };
 use spike::{
     capture_target, deliver_probe, record_one_second_probe, run_delivery_matrix_probe,
@@ -265,13 +265,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         true,
         None::<&str>,
     )?;
-    let fetch_model = MenuItem::with_id(
-        app,
-        "fetch_model",
-        "下载推荐模型…",
-        true,
-        None::<&str>,
-    )?;
+    let fetch_model = MenuItem::with_id(app, "fetch_model", "下载推荐模型…", true, None::<&str>)?;
     let sep_prefs = PredefinedMenuItem::separator(app)?;
 
     let settings = MenuItem::with_id(app, "settings", "设置…", true, None::<&str>)?;
@@ -456,43 +450,46 @@ fn register_session_shortcuts(app: &tauri::AppHandle) -> Result<String, String> 
             }
         };
         let hold = cfg.hold_to_talk;
-        match app.global_shortcut().on_shortcut(sc, move |app, shortcut, event| {
-            eprintln!(
-                "luozi: voice-edit hotkey {} {:?}",
-                shortcut.into_string(),
-                event.state
-            );
-            let app = app.clone();
-            match event.state {
-                ShortcutState::Pressed => {
-                    std::thread::spawn(move || {
-                        with_session(&app, |s| {
-                            session::controller::note_hold_pressed(s);
-                            if let Err(err) = session::controller::start_voice_edit_session(&app, s)
-                            {
-                                if err != "draft_empty" {
-                                    eprintln!("luozi: voice_edit start failed: {err}");
+        match app
+            .global_shortcut()
+            .on_shortcut(sc, move |app, shortcut, event| {
+                eprintln!(
+                    "luozi: voice-edit hotkey {} {:?}",
+                    shortcut.into_string(),
+                    event.state
+                );
+                let app = app.clone();
+                match event.state {
+                    ShortcutState::Pressed => {
+                        std::thread::spawn(move || {
+                            with_session(&app, |s| {
+                                session::controller::note_hold_pressed(s);
+                                if let Err(err) =
+                                    session::controller::start_voice_edit_session(&app, s)
+                                {
+                                    if err != "draft_empty" {
+                                        eprintln!("luozi: voice_edit start failed: {err}");
+                                    }
                                 }
-                            }
+                            });
                         });
-                    });
-                }
-                ShortcutState::Released if hold => {
-                    std::thread::spawn(move || {
-                        with_session(&app, |s| {
-                            session::controller::note_hold_released(s);
-                            if !session::controller::wait_until_recording(s, 800) {
-                                return;
-                            }
-                            if let Err(err) = session::controller::stop_session(&app, s) {
-                                eprintln!("luozi: voice_edit stop failed: {err}");
-                            }
+                    }
+                    ShortcutState::Released if hold => {
+                        std::thread::spawn(move || {
+                            with_session(&app, |s| {
+                                session::controller::note_hold_released(s);
+                                if !session::controller::wait_until_recording(s, 800) {
+                                    return;
+                                }
+                                if let Err(err) = session::controller::stop_session(&app, s) {
+                                    eprintln!("luozi: voice_edit stop failed: {err}");
+                                }
+                            });
                         });
-                    });
+                    }
+                    _ => {}
                 }
-                _ => {}
-            }
-        }) {
+            }) {
             Ok(()) => {
                 eprintln!("luozi: voice-edit shortcut registered: {raw}");
                 break;
@@ -555,9 +552,8 @@ pub fn run() {
             }
             if let Some(settings) = app.get_webview_window("settings") {
                 // Match settings CSS ice-white so dark-mode OS chrome does not show in corners.
-                let _ = settings.set_background_color(Some(tauri::window::Color(
-                    0xf4, 0xfb, 0xfa, 0xff,
-                )));
+                let _ = settings
+                    .set_background_color(Some(tauri::window::Color(0xf4, 0xfb, 0xfa, 0xff)));
                 let _ = settings.hide();
             }
             if let Some(overlay) = app.get_webview_window("overlay") {
@@ -577,13 +573,11 @@ pub fn run() {
             // M4: unload Whisper after ≥5 minutes idle (poll once a minute).
             {
                 let handle = app.handle().clone();
-                std::thread::spawn(move || {
-                    loop {
-                        std::thread::sleep(std::time::Duration::from_secs(60));
-                        with_session(&handle, |s| {
-                            session::controller::maybe_unload_idle_asr(s);
-                        });
-                    }
+                std::thread::spawn(move || loop {
+                    std::thread::sleep(std::time::Duration::from_secs(60));
+                    with_session(&handle, |s| {
+                        session::controller::maybe_unload_idle_asr(s);
+                    });
                 });
             }
 

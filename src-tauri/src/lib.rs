@@ -91,8 +91,23 @@ fn settings_cycle_asr_mode(app: tauri::AppHandle) -> Result<String, String> {
 }
 
 #[tauri::command]
+fn settings_set_asr_mode(app: tauri::AppHandle, mode: String) -> Result<String, String> {
+    session::controller::set_asr_mode(&app, &mode).map(|m| m.label_zh().to_string())
+}
+
+#[tauri::command]
+fn settings_set_asr_provider(app: tauri::AppHandle, provider_id: String) -> Result<(), String> {
+    session::controller::set_cloud_asr_provider(&app, &provider_id)
+}
+
+#[tauri::command]
+fn settings_set_text_ai_provider(app: tauri::AppHandle, provider_id: String) -> Result<(), String> {
+    session::controller::set_text_ai_provider(&app, &provider_id)
+}
+
+#[tauri::command]
 fn settings_prompt_asr_key(app: tauri::AppHandle) -> Result<(), String> {
-    session::controller::prompt_and_store_groq_key(&app)
+    session::controller::prompt_and_store_asr_key(&app)
 }
 
 #[tauri::command]
@@ -103,6 +118,11 @@ fn settings_consent_asr(app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 fn settings_prompt_text_ai_key(app: tauri::AppHandle) -> Result<(), String> {
     session::controller::prompt_and_store_text_ai_key(&app)
+}
+
+#[tauri::command]
+fn settings_prompt_text_ai_model(app: tauri::AppHandle) -> Result<(), String> {
+    session::controller::prompt_text_ai_model(&app)
 }
 
 #[tauri::command]
@@ -534,6 +554,10 @@ pub fn run() {
                 let _ = main.hide();
             }
             if let Some(settings) = app.get_webview_window("settings") {
+                // Match settings CSS ice-white so dark-mode OS chrome does not show in corners.
+                let _ = settings.set_background_color(Some(tauri::window::Color(
+                    0xf4, 0xfb, 0xfa, 0xff,
+                )));
                 let _ = settings.hide();
             }
             if let Some(overlay) = app.get_webview_window("overlay") {
@@ -687,9 +711,13 @@ pub fn run() {
             draft_reject_pending,
             settings_snapshot,
             settings_cycle_asr_mode,
+            settings_set_asr_mode,
+            settings_set_asr_provider,
+            settings_set_text_ai_provider,
             settings_prompt_asr_key,
             settings_consent_asr,
             settings_prompt_text_ai_key,
+            settings_prompt_text_ai_model,
             settings_consent_text_ai,
             settings_open_microphone,
             settings_open_accessibility,

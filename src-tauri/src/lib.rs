@@ -228,7 +228,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         true => format!("{model_label} · {cloud_label} · 辅助功能 OK"),
         false => format!("{model_label} · {cloud_label} · 辅助功能未生效"),
     };
-    let title = MenuItem::with_id(app, "title", "落字", false, None::<&str>)?;
+    let title = MenuItem::with_id(app, "title", "Luozi 已就绪", false, None::<&str>)?;
     let status = MenuItem::with_id(app, "status", status_label, false, None::<&str>)?;
     let sep_status = PredefinedMenuItem::separator(app)?;
 
@@ -239,38 +239,38 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         true,
         Some(cfg.continue_speaking_shortcut.as_str()),
     )?;
-    let draft = MenuItem::with_id(app, "draft", "打开语音草稿", true, None::<&str>)?;
-    let voice_edit = MenuItem::with_id(
-        app,
-        "voice_edit",
-        "说出修改要求",
-        true,
-        Some(cfg.voice_edit_shortcut.as_str()),
-    )?;
-    let cancel = MenuItem::with_id(app, "cancel", "取消当前录音", true, Some("Escape"))?;
+    let cancel = MenuItem::with_id(app, "cancel", "取消当前会话", true, Some("Escape"))?;
     let undo = MenuItem::with_id(app, "undo", "撤销上次落字", true, None::<&str>)?;
     let sep_actions = PredefinedMenuItem::separator(app)?;
 
-    let engine_label = match (model_ready, cloud_ok) {
-        (true, true) => "引擎：本地+云端（M5）",
-        (true, false) => "引擎：本地 Whisper",
-        (false, true) => "引擎：仅云端 Groq",
-        (false, false) => "引擎：未就绪",
-    };
-    let engine = MenuItem::with_id(app, "engine", engine_label, false, None::<&str>)?;
-    let asr_mode = MenuItem::with_id(
+    let draft = MenuItem::with_id(app, "draft", "打开语音草稿…", true, None::<&str>)?;
+    let voice_edit = MenuItem::with_id(
         app,
-        "asr_mode",
-        &format!("切换引擎模式（当前：{}）", cfg.asr_mode.label_zh()),
+        "voice_edit",
+        "修改当前草稿",
         true,
-        None::<&str>,
+        Some(cfg.voice_edit_shortcut.as_str()),
     )?;
-    let fetch_model = MenuItem::with_id(app, "fetch_model", "下载推荐模型…", true, None::<&str>)?;
     let sep_prefs = PredefinedMenuItem::separator(app)?;
 
+    let engine = MenuItem::with_id(
+        app,
+        "engine",
+        &format!("转写：{}", cfg.asr_mode.label_zh()),
+        false,
+        None::<&str>,
+    )?;
+    let fetch_model = MenuItem::with_id(
+        app,
+        "fetch_model",
+        "下载本地模型…",
+        !model_ready,
+        None::<&str>,
+    )?;
+
     let settings = MenuItem::with_id(app, "settings", "设置…", true, None::<&str>)?;
-    let about = MenuItem::with_id(app, "about", "关于落字", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "退出落字", true, None::<&str>)?;
+    let about = MenuItem::with_id(app, "about", "关于 Luozi", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "退出 Luozi", true, None::<&str>)?;
 
     let menu = Menu::with_items(
         app,
@@ -279,15 +279,14 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             &status,
             &sep_status,
             &start,
-            &draft,
-            &voice_edit,
             &cancel,
             &undo,
             &sep_actions,
-            &engine,
-            &asr_mode,
-            &fetch_model,
+            &draft,
+            &voice_edit,
             &sep_prefs,
+            &engine,
+            &fetch_model,
             &settings,
             &about,
             &quit,
@@ -321,11 +320,6 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             "fetch_model" => with_session(app, |s| {
                 session::controller::fetch_recommended_model(app, s);
             }),
-            "asr_mode" => {
-                if let Err(err) = session::controller::cycle_asr_mode(app) {
-                    eprintln!("luozi: cycle asr mode failed: {err}");
-                }
-            }
             "quit" => app.exit(0),
             _ => {}
         })

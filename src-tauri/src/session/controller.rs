@@ -521,6 +521,10 @@ pub fn capture_source_token(app: &AppHandle) -> TargetToken {
 }
 
 fn show_overlay(app: &AppHandle, visible: bool) {
+    show_overlay_ex(app, visible, false);
+}
+
+fn show_overlay_ex(app: &AppHandle, visible: bool, interactive: bool) {
     // Never block session control; never use the short AX timeout (hide was failing
     // silently and leaving the HUD stuck on the last message).
     let app = app.clone();
@@ -530,7 +534,9 @@ fn show_overlay(app: &AppHandle, visible: bool) {
         if app
             .run_on_main_thread(move || {
                 if let Some(window) = app2.get_webview_window("overlay") {
-                    let _ = window.set_ignore_cursor_events(true);
+                    // Typeless-style cancel/confirm need hits during recording;
+                    // keep pass-through the rest of the time so HUD never steals clicks.
+                    let _ = window.set_ignore_cursor_events(!interactive);
                     let _ = window.set_background_color(Some(tauri::window::Color(0, 0, 0, 0)));
                     if visible {
                         let _ = window.show();
@@ -1202,7 +1208,7 @@ pub fn start_session_with_token(
             }
 
             let _ = state.source_target.lock().map(|mut g| *g = Some(token));
-            show_overlay(app, true);
+            show_overlay_ex(app, true, true);
             arm_escape(app);
             let editing = state
                 .intent
@@ -1211,9 +1217,9 @@ pub fn start_session_with_token(
                 .map(|g| *g == SessionIntent::VoiceEdit)
                 .unwrap_or(false);
             if editing {
-                emit_phase(app, "recording_edit", "说修改要求… · Esc 取消");
+                emit_phase(app, "recording_edit", "说修改要求…");
             } else {
-                emit_phase(app, "recording", "听写中 · Esc 取消");
+                emit_phase(app, "recording", "听写中");
             }
 
             // Best-effort focus capture in background (never blocks start).
@@ -1240,7 +1246,7 @@ pub fn start_session_with_token(
                 // Keep HUD on recording copy even if capture was soft-fail.
                 if let Some(state) = app_cap.try_state::<AppSessionState>() {
                     if is_recording_phase(&state) {
-                        emit_phase(&app_cap, "recording", "听写中 · Esc 取消");
+                        emit_phase(&app_cap, "recording", "听写中");
                     }
                 }
             });
@@ -1366,6 +1372,7 @@ pub fn stop_session(app: &AppHandle, state: &AppSessionState) -> Result<SessionS
         }
         SessionEffect::BeginTranscribe { session_id } => {
             emit_phase(app, "transcribing", "落字中");
+            show_overlay_ex(app, true, false);
             let language = super::config_store::load().language;
             let Some(capture) = audio else {
                 return fail_transcribe(app, state, "asr_no_audio".into());

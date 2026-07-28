@@ -6,16 +6,47 @@
     <title>Luozi Overlay</title>
   </head>
   <body>
-    <div class="overlay" role="status">
-      <svg class="mark" viewBox="0 0 24 24" aria-hidden="true">
-        <path class="arc" d="M4.2 6.8c-1.8 1.6-2.2 4-1.2 6" stroke-width="2.4" />
-        <path class="arc" d="M19.8 6.2c1.5 1.2 1.9 3.4 1 5.4" stroke-width="2.2" />
-        <rect class="stem" x="10.2" y="2.4" width="3.6" height="9.2" rx="1.6" />
-        <circle class="dot" cx="12" cy="14" r="2.2" />
-        <rect class="base" x="5.6" y="17.2" width="12.8" height="2.2" rx="1.1" />
-      </svg>
-      <span class="pulse" aria-hidden="true"></span>
-      <span class="label">听写中</span>
+    <div class="overlay" role="status" data-phase="idle">
+      <button type="button" class="hud-btn hud-cancel" id="btnCancel" title="取消" aria-label="取消录音" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            d="M7 7l10 10M17 7L7 17"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.4"
+            stroke-linecap="round"
+          />
+        </svg>
+      </button>
+
+      <div class="hud-mid">
+        <div class="wave" id="wave" aria-hidden="true" hidden>
+          <span></span><span></span><span></span><span></span><span></span
+          ><span></span><span></span>
+        </div>
+        <svg class="mark" viewBox="0 0 24 24" aria-hidden="true">
+          <path class="arc" d="M4.2 6.8c-1.8 1.6-2.2 4-1.2 6" stroke-width="2.4" />
+          <path class="arc" d="M19.8 6.2c1.5 1.2 1.9 3.4 1 5.4" stroke-width="2.2" />
+          <rect class="stem" x="10.2" y="2.4" width="3.6" height="9.2" rx="1.6" />
+          <circle class="dot" cx="12" cy="14" r="2.2" />
+          <rect class="base" x="5.6" y="17.2" width="12.8" height="2.2" rx="1.1" />
+        </svg>
+        <span class="pulse" aria-hidden="true"></span>
+        <span class="label">听写中</span>
+      </div>
+
+      <button type="button" class="hud-btn hud-confirm" id="btnConfirm" title="完成" aria-label="完成录音" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            d="M6.5 12.5l3.5 3.5 7.5-8"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+      </button>
     </div>
     <script type="module" src="/src/overlay.ts"></script>
   </body>

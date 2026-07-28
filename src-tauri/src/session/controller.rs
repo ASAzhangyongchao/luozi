@@ -1,6 +1,7 @@
 //! App-owned session controller: machine + recorder + delivery.
 
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -34,6 +35,92 @@ const TRANSCRIBE_WATCHDOG_MS: u64 = 45_000;
 /// Brief status on overlay before auto-dismiss (inserted / canceled / errors).
 const OVERLAY_AUTO_HIDE_MS: u64 = 2_200;
 
+#[derive(Clone, Default)]
+struct EnergySessionGate {
+    state: Arc<Mutex<Option<(u64, bool)>>>,
+}
+
+impl EnergySessionGate {
+    fn activate(&self, session_id: u64) -> bool {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if *state == Some((session_id, false)) {
+            return false;
+        }
+        *state = Some((session_id, true));
+        true
+    }
+
+    fn deactivate(&self, session_id: u64) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if state.is_none_or(|(current_session_id, _)| current_session_id == session_id) {
+            *state = Some((session_id, false));
+        }
+    }
+
+    fn deactivate_current(&self) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some((session_id, _)) = *state {
+            *state = Some((session_id, false));
+        }
+    }
+}
+
+fn forward_energy_if_active(
+    gate: &EnergySessionGate,
+    session_id: u64,
+    level: f32,
+    emit: impl FnOnce(f32),
+) -> bool {
+    let state = gate
+        .state
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if *state != Some((session_id, true)) {
+        return false;
+    }
+
+    // Keep the gate locked across emit so deactivate returning means no event is in flight.
+    emit(level);
+    drop(state);
+    true
+}
+
+fn try_queue_energy(sender: &SyncSender<f32>, level: f32) {
+    let _ = sender.try_send(level);
+}
+
+fn energy_event_channel() -> (EnergySink, Receiver<f32>) {
+    let (sender, receiver) = sync_channel(1);
+    let sink: EnergySink = Arc::new(move |level| try_queue_energy(&sender, level));
+    (sink, receiver)
+}
+
+fn spawn_energy_event_worker(
+    session_id: u64,
+    gate: EnergySessionGate,
+    receiver: Receiver<f32>,
+    emit: impl Fn(u64, f32) + Send + 'static,
+) {
+    std::thread::spawn(move || {
+        while let Ok(level) = receiver.recv() {
+            if !forward_energy_if_active(&gate, session_id, level, |level| {
+                emit(session_id, level);
+            }) {
+                break;
+            }
+        }
+    });
+}
+
 fn arm_escape(_app: &AppHandle) {
     // Escape is registered once at startup; keep it for the whole process life.
 }
@@ -62,6 +149,7 @@ pub struct AppSessionState {
     pub model_fetching: AtomicBool,
     /// Continue dictation vs voice-edit instruction (M7).
     pub intent: Mutex<SessionIntent>,
+    energy_session: EnergySessionGate,
     #[allow(dead_code)]
     pub config: AppConfig,
 }
@@ -80,6 +168,7 @@ impl Default for AppSessionState {
             source_pid: Mutex::new(None),
             model_fetching: AtomicBool::new(false),
             intent: Mutex::new(SessionIntent::Continue),
+            energy_session: EnergySessionGate::default(),
             config: super::config_store::load(),
         }
     }
@@ -1246,25 +1335,16 @@ pub fn start_session_with_token(
                 .lock()
                 .map(|mut g| *g = spike::current_frontmost_pid());
 
-            let app_for_energy = app.clone();
-            let energy_sink: EnergySink = Arc::new(move |level| {
-                let _ = app_for_energy.emit(
-                    "session://energy",
-                    serde_json::json!({
-                        "sessionId": session_id,
-                        "level": level,
-                    }),
-                );
-            });
+            let (energy_sink, energy_receiver) = energy_event_channel();
 
             // Mic open can block on first-run TCC. Do not leave「听写中」if the user
             // already released during that dialog (hold_active cleared on Released).
-            let start_result = state
-                .recorder
-                .lock()
-                .map_err(|_| "recorder_lock_failed".to_string())?
-                .start(energy_sink);
+            let start_result = match state.recorder.lock() {
+                Ok(mut recorder) => recorder.start(energy_sink),
+                Err(_) => Err("recorder_lock_failed".to_string()),
+            };
             if let Err(err) = start_result {
+                state.energy_session.deactivate(session_id);
                 let _ = state
                     .machine
                     .lock()
@@ -1278,6 +1358,7 @@ pub fn start_session_with_token(
                 eprintln!(
                     "luozi: hold released during mic open (likely TCC) — cancel session {session_id}"
                 );
+                state.energy_session.deactivate(session_id);
                 if let Ok(mut rec) = state.recorder.lock() {
                     rec.cancel();
                 }
@@ -1289,6 +1370,24 @@ pub fn start_session_with_token(
                 disarm_escape(app);
                 emit_transient(app, "canceled", "已授权麦克风。请再按住说话，松手落字");
                 return status_from(state, "canceled_after_permission".into());
+            }
+
+            if state.energy_session.activate(session_id) {
+                let app_for_energy = app.clone();
+                spawn_energy_event_worker(
+                    session_id,
+                    state.energy_session.clone(),
+                    energy_receiver,
+                    move |session_id, level| {
+                        let _ = app_for_energy.emit(
+                            "session://energy",
+                            serde_json::json!({
+                                "sessionId": session_id,
+                                "level": level,
+                            }),
+                        );
+                    },
+                );
             }
 
             let _ = state.source_target.lock().map(|mut g| *g = Some(token));
@@ -1412,10 +1511,16 @@ pub fn start_session_with_token(
 
 pub fn stop_session(app: &AppHandle, state: &AppSessionState) -> Result<SessionStatus, String> {
     // Duplicate Released / race after ASR started: ignore without Cancel.
-    if !is_recording_phase(state) {
+    let session_id = state
+        .machine
+        .lock()
+        .ok()
+        .and_then(|machine| machine.recording_session_id());
+    let Some(session_id) = session_id else {
         eprintln!("luozi: stop ignored (not recording)");
         return status_from(state, "stop_ignored".into());
-    }
+    };
+    state.energy_session.deactivate(session_id);
 
     let duration_ms = state
         .recorder
@@ -1476,6 +1581,7 @@ pub fn stop_session(app: &AppHandle, state: &AppSessionState) -> Result<SessionS
 pub fn cancel_session(app: &AppHandle, state: &AppSessionState) -> Result<SessionStatus, String> {
     state.hold_active.store(false, Ordering::SeqCst);
     let _ = state.source_pid.lock().map(|mut g| *g = None);
+    state.energy_session.deactivate_current();
     if let Ok(mut rec) = state.recorder.lock() {
         rec.cancel();
     }
@@ -1566,4 +1672,70 @@ pub fn session_undo_last(
 #[tauri::command]
 pub fn session_status(state: State<'_, AppSessionState>) -> Result<SessionStatus, String> {
     status_from(&state, "ok".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{energy_event_channel, forward_energy_if_active, EnergySessionGate};
+    use std::sync::mpsc::TryRecvError;
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn energy_event_channel_queues_until_worker_starts_and_drops_when_full() {
+        let (sink, receiver) = energy_event_channel();
+
+        sink(0.25);
+        sink(0.75);
+
+        assert_eq!(receiver.try_recv(), Ok(0.25));
+        assert_eq!(receiver.try_recv(), Err(TryRecvError::Empty));
+    }
+
+    #[test]
+    fn energy_event_gate_drops_queued_and_new_levels_after_deactivation() {
+        let gate = EnergySessionGate::default();
+        let emitted = Arc::new(Mutex::new(Vec::new()));
+        let session_id = 7;
+        gate.activate(session_id);
+
+        let emitted_while_active = emitted.clone();
+        assert!(forward_energy_if_active(
+            &gate,
+            session_id,
+            0.25,
+            move |level| emitted_while_active
+                .lock()
+                .expect("emitted lock")
+                .push(level),
+        ));
+
+        gate.deactivate(session_id);
+        for level in [0.5, 0.75] {
+            let emitted_after_stop = emitted.clone();
+            assert!(!forward_energy_if_active(
+                &gate,
+                session_id,
+                level,
+                move |level| emitted_after_stop.lock().expect("emitted lock").push(level),
+            ));
+        }
+
+        assert_eq!(*emitted.lock().expect("emitted lock"), vec![0.25]);
+    }
+
+    #[test]
+    fn energy_event_gate_does_not_reactivate_a_stopped_session() {
+        let gate = EnergySessionGate::default();
+        let session_id = 8;
+
+        gate.deactivate(session_id);
+
+        assert!(!gate.activate(session_id));
+        assert!(!forward_energy_if_active(
+            &gate,
+            session_id,
+            0.5,
+            |_| panic!("stopped session must not emit"),
+        ));
+    }
 }

@@ -38,6 +38,10 @@ impl EnergyReporter {
 
     fn observe_levels(&self, rms: f32, peak: f32) {
         let now_ms = self.started.elapsed().as_millis() as u64;
+        self.observe_levels_at(rms, peak, now_ms);
+    }
+
+    fn observe_levels_at(&self, rms: f32, peak: f32, now_ms: u64) {
         let level = {
             let Ok(mut state) = self.state.lock() else {
                 return;
@@ -340,13 +344,14 @@ mod tests {
     }
 
     #[test]
-    fn energy_reporter_throttles_consecutive_observations_within_40ms() {
+    fn energy_reporter_throttles_at_deterministic_40ms_intervals() {
         let (reporter, levels) = collecting_reporter();
 
-        reporter.observe_levels(0.25, 0.5);
-        reporter.observe_levels(0.5, 0.75);
+        reporter.observe_levels_at(0.25, 0.5, 0);
+        reporter.observe_levels_at(0.5, 0.75, 20);
+        reporter.observe_levels_at(0.75, 1.0, 40);
 
-        assert_eq!(levels.lock().expect("level collector lock").len(), 1);
+        assert_eq!(levels.lock().expect("level collector lock").len(), 2);
     }
 
     #[test]

@@ -74,6 +74,14 @@ impl EnergySessionGate {
     }
 }
 
+fn deactivate_energy_for_cancel(gate: &EnergySessionGate, recording_session_id: Option<u64>) {
+    if let Some(session_id) = recording_session_id {
+        gate.deactivate(session_id);
+    } else {
+        gate.deactivate_current();
+    }
+}
+
 fn forward_energy_if_active(
     gate: &EnergySessionGate,
     session_id: u64,
@@ -1372,23 +1380,24 @@ pub fn start_session_with_token(
                 return status_from(state, "canceled_after_permission".into());
             }
 
-            if state.energy_session.activate(session_id) {
-                let app_for_energy = app.clone();
-                spawn_energy_event_worker(
-                    session_id,
-                    state.energy_session.clone(),
-                    energy_receiver,
-                    move |session_id, level| {
-                        let _ = app_for_energy.emit(
-                            "session://energy",
-                            serde_json::json!({
-                                "sessionId": session_id,
-                                "level": level,
-                            }),
-                        );
-                    },
-                );
+            if !state.energy_session.activate(session_id) {
+                return status_from(state, "canceled_before_energy_worker".into());
             }
+            let app_for_energy = app.clone();
+            spawn_energy_event_worker(
+                session_id,
+                state.energy_session.clone(),
+                energy_receiver,
+                move |session_id, level| {
+                    let _ = app_for_energy.emit(
+                        "session://energy",
+                        serde_json::json!({
+                            "sessionId": session_id,
+                            "level": level,
+                        }),
+                    );
+                },
+            );
 
             let _ = state.source_target.lock().map(|mut g| *g = Some(token));
             show_overlay(app, true);
@@ -1581,7 +1590,12 @@ pub fn stop_session(app: &AppHandle, state: &AppSessionState) -> Result<SessionS
 pub fn cancel_session(app: &AppHandle, state: &AppSessionState) -> Result<SessionStatus, String> {
     state.hold_active.store(false, Ordering::SeqCst);
     let _ = state.source_pid.lock().map(|mut g| *g = None);
-    state.energy_session.deactivate_current();
+    let recording_session_id = state
+        .machine
+        .lock()
+        .ok()
+        .and_then(|machine| machine.recording_session_id());
+    deactivate_energy_for_cancel(&state.energy_session, recording_session_id);
     if let Ok(mut rec) = state.recorder.lock() {
         rec.cancel();
     }
@@ -1676,7 +1690,10 @@ pub fn session_status(state: State<'_, AppSessionState>) -> Result<SessionStatus
 
 #[cfg(test)]
 mod tests {
-    use super::{energy_event_channel, forward_energy_if_active, EnergySessionGate};
+    use super::{
+        deactivate_energy_for_cancel, energy_event_channel, forward_energy_if_active,
+        EnergySessionGate,
+    };
     use std::sync::mpsc::TryRecvError;
     use std::sync::{Arc, Mutex};
 
@@ -1737,5 +1754,15 @@ mod tests {
             0.5,
             |_| panic!("stopped session must not emit"),
         ));
+    }
+
+    #[test]
+    fn energy_event_cancel_uses_recording_session_id_to_tombstone_an_empty_gate() {
+        let gate = EnergySessionGate::default();
+        let session_id = 9;
+
+        deactivate_energy_for_cancel(&gate, Some(session_id));
+
+        assert!(!gate.activate(session_id));
     }
 }

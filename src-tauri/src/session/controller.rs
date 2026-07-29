@@ -596,6 +596,7 @@ enum DeliverOutcome {
     Inserted,
     Clipboard,
     Discard,
+    #[allow(dead_code)]
     Error(String),
 }
 

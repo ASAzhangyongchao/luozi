@@ -34,7 +34,9 @@ pub struct PendingEdit {
     pub start: usize,
     pub end: usize,
     pub proposed: String,
+    #[allow(dead_code)]
     pub reasons: Vec<String>,
+    #[allow(dead_code)]
     pub original: String,
 }
 
@@ -116,10 +118,7 @@ impl DraftStore {
             .last
             .lock()
             .ok()
-            .map(|g| match g.as_ref() {
-                Some(l) if l.at.elapsed() < LAST_TTL => true,
-                _ => false,
-            })
+            .map(|g| matches!(g.as_ref(), Some(l) if l.at.elapsed() < LAST_TTL))
             .unwrap_or(false);
         match doc {
             Some(d) => DraftStateDto {

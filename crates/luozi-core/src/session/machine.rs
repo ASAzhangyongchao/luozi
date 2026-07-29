@@ -6,12 +6,19 @@ pub type SessionId = u64;
 /// Minimum hold duration before stop is treated as a real utterance (spec: 0.3s).
 pub const MIN_RECORDING_MS: u64 = 300;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub enum SessionPhase {
+    #[default]
     Idle,
-    Recording { session_id: SessionId },
-    Transcribing { session_id: SessionId },
-    Delivering { session_id: SessionId },
+    Recording {
+        session_id: SessionId,
+    },
+    Transcribing {
+        session_id: SessionId,
+    },
+    Delivering {
+        session_id: SessionId,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -51,12 +58,6 @@ pub enum SessionEffect {
 pub struct SessionMachine {
     phase: SessionPhase,
     next_id: SessionId,
-}
-
-impl Default for SessionPhase {
-    fn default() -> Self {
-        Self::Idle
-    }
 }
 
 impl SessionMachine {

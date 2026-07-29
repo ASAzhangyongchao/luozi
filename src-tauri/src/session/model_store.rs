@@ -15,6 +15,7 @@ const MANIFEST_JSON: &str = include_str!("../../resources/models-manifest.json")
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelManifest {
+    #[allow(dead_code)]
     pub schema_version: u32,
     pub models: Vec<ModelEntry>,
 }
@@ -176,9 +177,8 @@ where
     download_to(&entry.url, &partial, entry.bytes, &mut on_progress)?;
 
     on_progress(95, "verifying");
-    verify_entry(&partial, &entry).map_err(|e| {
+    verify_entry(&partial, &entry).inspect_err(|_| {
         let _ = fs::remove_file(&partial);
-        e
     })?;
 
     // Replace destination atomically-ish.
@@ -238,9 +238,11 @@ where
         file.write_all(&buf[..n])
             .map_err(|e| format!("model_download_write_failed: {e}"))?;
         written += n as u64;
-        if expected_bytes > 0 {
-            let pct = ((written * 90) / expected_bytes).min(90) as u8;
-            on_progress(pct.max(1), "downloading");
+        if let Some(pct) = written
+            .checked_mul(90)
+            .and_then(|n| n.checked_div(expected_bytes))
+        {
+            on_progress((pct as u8).clamp(1, 90), "downloading");
         }
     }
     file.flush()

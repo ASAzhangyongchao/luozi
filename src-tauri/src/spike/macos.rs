@@ -181,6 +181,7 @@ pub(crate) fn activate_pid(pid: i32) -> Result<(), String> {
     let Some(app) = NSRunningApplication::runningApplicationWithProcessIdentifier(pid) else {
         return Err(format!("no_running_app_for_pid:{pid}"));
     };
+    #[allow(deprecated)]
     let ok = app.activateWithOptions(
         NSApplicationActivationOptions::ActivateIgnoringOtherApps
             | NSApplicationActivationOptions::ActivateAllWindows,

@@ -216,9 +216,9 @@ mod tests {
         let text = "订单 ASFF 金额 12800 元，日期 2026-07-27";
         let spans = extract_protected_spans(text);
         let tokens: Vec<&str> = spans.iter().map(|(s, e)| &text[*s..*e]).collect();
-        assert!(tokens.iter().any(|t| *t == "ASFF"));
-        assert!(tokens.iter().any(|t| *t == "12800"));
-        assert!(tokens.iter().any(|t| *t == "2026-07-27"));
+        assert!(tokens.contains(&"ASFF"));
+        assert!(tokens.contains(&"12800"));
+        assert!(tokens.contains(&"2026-07-27"));
     }
 
     #[test]

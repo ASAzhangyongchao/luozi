@@ -92,6 +92,7 @@ pub fn get_secret(account: &str) -> Result<String, String> {
     }
 }
 
+#[allow(dead_code)]
 pub fn delete_secret(account: &str) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {

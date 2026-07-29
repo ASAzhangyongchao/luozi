@@ -261,7 +261,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let asr_mode = MenuItem::with_id(
         app,
         "asr_mode",
-        &format!("切换引擎模式（当前：{}）", cfg.asr_mode.label_zh()),
+        format!("切换引擎模式（当前：{}）", cfg.asr_mode.label_zh()),
         true,
         None::<&str>,
     )?;

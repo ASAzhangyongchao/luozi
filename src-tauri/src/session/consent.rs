@@ -77,6 +77,7 @@ pub fn grant(provider_id: &str, host: &str) -> Result<(), String> {
     save(&store)
 }
 
+#[allow(dead_code)]
 pub fn revoke(provider_id: &str, host: &str) -> Result<(), String> {
     let mut store = load();
     store

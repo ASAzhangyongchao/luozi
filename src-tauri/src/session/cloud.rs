@@ -165,7 +165,7 @@ fn upload_transcription(
         &wav_bytes,
     );
     writeln!(body, "--{boundary}--\r").map_err(|e| e.to_string())?;
-    write!(body, "\n").map_err(|e| e.to_string())?;
+    writeln!(body).map_err(|e| e.to_string())?;
 
     let url = format!(
         "{}/audio/transcriptions",
@@ -486,8 +486,10 @@ mod tests {
 
     #[test]
     fn unsupported_not_ready() {
-        let mut cfg = CloudAsrConfig::default();
-        cfg.protocol = AsrProtocol::Unsupported;
+        let cfg = CloudAsrConfig {
+            protocol: AsrProtocol::Unsupported,
+            ..Default::default()
+        };
         assert!(!cloud_ready(&cfg));
     }
 }

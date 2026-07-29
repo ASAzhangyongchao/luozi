@@ -148,7 +148,7 @@ fn build_stream(
         SampleFormat::F32 => {
             let samples_cb = samples;
             device.build_input_stream(
-                config.clone(),
+                *config,
                 move |data: &[f32], _| {
                     if let Ok(mut buf) = samples_cb.lock() {
                         buf.extend_from_slice(data);
@@ -161,7 +161,7 @@ fn build_stream(
         SampleFormat::I16 => {
             let samples_cb = samples;
             device.build_input_stream(
-                config.clone(),
+                *config,
                 move |data: &[i16], _| {
                     if let Ok(mut buf) = samples_cb.lock() {
                         buf.extend(data.iter().map(|s| *s as f32 / i16::MAX as f32));
@@ -174,7 +174,7 @@ fn build_stream(
         SampleFormat::I32 => {
             let samples_cb = samples;
             device.build_input_stream(
-                config.clone(),
+                *config,
                 move |data: &[i32], _| {
                     if let Ok(mut buf) = samples_cb.lock() {
                         buf.extend(data.iter().map(|s| *s as f32 / i32::MAX as f32));
@@ -187,7 +187,7 @@ fn build_stream(
         SampleFormat::U16 => {
             let samples_cb = samples;
             device.build_input_stream(
-                config.clone(),
+                *config,
                 move |data: &[u16], _| {
                     if let Ok(mut buf) = samples_cb.lock() {
                         buf.extend(

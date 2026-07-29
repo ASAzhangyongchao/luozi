@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::providers::AsrProtocol;
+
 /// Current on-disk / IPC config schema. Bump only with a migration plan.
 pub const DEFAULT_SCHEMA_VERSION: u32 = 1;
 
@@ -56,6 +58,9 @@ pub struct CloudAsrConfig {
     pub model: String,
     /// Keychain account id, e.g. `asr.groq`.
     pub credential_ref: String,
+    /// Vendor wire protocol (defaults to OpenAI transcriptions for old configs).
+    #[serde(default)]
+    pub protocol: AsrProtocol,
 }
 
 impl Default for CloudAsrConfig {
@@ -65,6 +70,7 @@ impl Default for CloudAsrConfig {
             base_url: GROQ_DEFAULT_BASE_URL.into(),
             model: GROQ_DEFAULT_MODEL.into(),
             credential_ref: "asr.groq".into(),
+            protocol: AsrProtocol::OpenaiTranscriptions,
         }
     }
 }

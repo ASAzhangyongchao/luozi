@@ -972,13 +972,30 @@ fn user_facing_asr_error(err: &str) -> String {
     if err.contains("local_not_ready") || err.contains("model_missing") {
         return "本地模型未就绪 · 可下载或改云端".into();
     }
+    if err.contains("cloud_provider_unsupported") {
+        return "当前厂商无云端 ASR · 请用本地或换厂商".into();
+    }
     if err.contains("cloud_not_ready") || err.contains("no_engine") {
-        return "无可用引擎 · 配置本地或 Groq".into();
+        return "无可用引擎 · 配置本地或云端 ASR".into();
     }
     if err.contains("no_speech") {
         return "未检测到语音".into();
     }
     err.to_string()
+}
+
+/// Set ASR mode by id (`auto` / `localOnly` / `cloudOnly`) and persist.
+pub fn set_asr_mode(app: &AppHandle, mode: &str) -> Result<AsrMode, String> {
+    let next = luozi_core::asr_mode_from_str(mode).ok_or_else(|| "invalid_asr_mode".to_string())?;
+    let cfg = super::config_store::update(|c| {
+        c.asr_mode = next;
+    })?;
+    emit_transient(
+        app,
+        "inserted",
+        &format!("引擎模式：{}", cfg.asr_mode.label_zh()),
+    );
+    Ok(cfg.asr_mode)
 }
 
 /// Cycle ASR mode Auto → LocalOnly → CloudOnly and persist.
@@ -994,9 +1011,119 @@ pub fn cycle_asr_mode(app: &AppHandle) -> Result<AsrMode, String> {
     Ok(cfg.asr_mode)
 }
 
+/// Switch cloud ASR preset (Key/consent stay per credential_ref / provider_id).
+pub fn set_cloud_asr_provider(app: &AppHandle, provider_id: &str) -> Result<(), String> {
+    let preset =
+        luozi_core::asr_preset(provider_id).ok_or_else(|| "unknown_asr_provider".to_string())?;
+    let next = luozi_core::cloud_asr_from_preset(preset);
+    let _ = super::config_store::update(|c| {
+        c.cloud_asr = next;
+    })?;
+    emit_transient(
+        app,
+        "inserted",
+        &format!("云端 ASR：{}", preset.label_zh),
+    );
+    Ok(())
+}
+
+/// Switch text AI preset.
+pub fn set_text_ai_provider(app: &AppHandle, provider_id: &str) -> Result<(), String> {
+    let preset = luozi_core::text_ai_preset(provider_id)
+        .ok_or_else(|| "unknown_text_ai_provider".to_string())?;
+    let next = luozi_core::text_ai_from_preset(preset);
+    let _ = super::config_store::update(|c| {
+        c.text_ai = next;
+    })?;
+    // Doubao needs a real Endpoint ID — prompt once if still placeholder.
+    if provider_id == "textai.doubao" {
+        if let Err(e) = prompt_text_ai_model(app) {
+            if e != "canceled" {
+                return Err(e);
+            }
+        }
+    }
+    emit_transient(
+        app,
+        "inserted",
+        &format!("文本 AI：{}", preset.label_zh),
+    );
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn osascript_prompt(message: &str) -> Result<String, String> {
+    let escaped = message.replace('\\', "\\\\").replace('"', "\\\"");
+    let script = format!(
+        r#"set answer to display dialog "{escaped}" default answer "" with hidden answer buttons {{"取消", "保存"}} default button "保存"
+        if button returned of answer is "取消" then return ""
+        return text returned of answer"#
+    );
+    let out = std::process::Command::new("osascript")
+        .args(["-e", &script])
+        .output()
+        .map_err(|e| format!("osascript_failed: {e}"))?;
+    if !out.status.success() {
+        return Err("canceled".into());
+    }
+    let key = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if key.is_empty() {
+        return Err("canceled".into());
+    }
+    Ok(key)
+}
+
+#[cfg(target_os = "macos")]
+fn osascript_prompt_visible(message: &str, default: &str) -> Result<String, String> {
+    let escaped = message.replace('\\', "\\\\").replace('"', "\\\"");
+    let def = default.replace('\\', "\\\\").replace('"', "\\\"");
+    let script = format!(
+        r#"set answer to display dialog "{escaped}" default answer "{def}" buttons {{"取消", "保存"}} default button "保存"
+        if button returned of answer is "取消" then return ""
+        return text returned of answer"#
+    );
+    let out = std::process::Command::new("osascript")
+        .args(["-e", &script])
+        .output()
+        .map_err(|e| format!("osascript_failed: {e}"))?;
+    if !out.status.success() {
+        return Err("canceled".into());
+    }
+    let value = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if value.is_empty() {
+        return Err("canceled".into());
+    }
+    Ok(value)
+}
+
+pub fn prompt_text_ai_model(app: &AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let cfg = super::config_store::load();
+        let current = cfg.text_ai.model.clone();
+        let value = osascript_prompt_visible(
+            "文本 AI 模型名（豆包请填方舟 Endpoint ID，形如 ep-…）",
+            &current,
+        )?;
+        let _ = super::config_store::update(|c| {
+            c.text_ai.model = value;
+        })?;
+        emit_transient(app, "inserted", "文本 AI 模型已更新");
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        Err("unsupported".into())
+    }
+}
+
 /// Record consent for current cloud preset host.
 pub fn consent_current_cloud(app: &AppHandle) -> Result<(), String> {
     let cfg = super::config_store::load();
+    if !cfg.cloud_asr.protocol.supports_cloud() {
+        return Err("cloud_provider_unsupported".into());
+    }
     let host = cfg
         .cloud_asr
         .host()
@@ -1010,35 +1137,20 @@ pub fn consent_current_cloud(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Prompt for Groq API key (macOS) and store in Keychain.
-pub fn prompt_and_store_groq_key(app: &AppHandle) -> Result<(), String> {
+/// Prompt for current ASR provider API key (macOS) and store in Keychain.
+pub fn prompt_and_store_asr_key(app: &AppHandle) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        let script = r#"
-        set answer to display dialog "粘贴 Groq API Key（仅存本机钥匙串，不会进配置文件）" default answer "" with hidden answer buttons {"取消", "保存"} default button "保存"
-        if button returned of answer is "取消" then return ""
-        return text returned of answer
-        "#;
-        let out = std::process::Command::new("osascript")
-            .args(["-e", script])
-            .output()
-            .map_err(|e| format!("osascript_failed: {e}"))?;
-        if !out.status.success() {
-            return Err("canceled".into());
-        }
-        let key = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if key.is_empty() {
-            return Err("canceled".into());
-        }
         let cfg = super::config_store::load();
+        if !cfg.cloud_asr.protocol.supports_cloud() {
+            return Err("cloud_provider_unsupported".into());
+        }
+        let prompt = luozi_core::asr_preset(&cfg.cloud_asr.provider_id)
+            .map(|p| p.key_prompt_zh)
+            .unwrap_or("粘贴云端 ASR API Key（仅存本机钥匙串）");
+        let key = osascript_prompt(prompt)?;
         super::credentials::set_secret(&cfg.cloud_asr.credential_ref, &key)?;
-        // Ensure Groq preset fields are present.
-        let _ = super::config_store::update(|c| {
-            if c.cloud_asr.provider_id.is_empty() {
-                c.cloud_asr = luozi_core::CloudAsrConfig::default();
-            }
-        });
-        emit_transient(app, "inserted", "Groq Key 已写入钥匙串");
+        emit_transient(app, "inserted", "ASR Key 已写入钥匙串");
         Ok(())
     }
     #[cfg(not(target_os = "macos"))]
@@ -1052,29 +1164,12 @@ pub fn prompt_and_store_groq_key(app: &AppHandle) -> Result<(), String> {
 pub fn prompt_and_store_text_ai_key(app: &AppHandle) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        let script = r#"
-        set answer to display dialog "粘贴文本 AI API Key（Groq/OpenAI 兼容；仅存本机钥匙串）" default answer "" with hidden answer buttons {"取消", "保存"} default button "保存"
-        if button returned of answer is "取消" then return ""
-        return text returned of answer
-        "#;
-        let out = std::process::Command::new("osascript")
-            .args(["-e", script])
-            .output()
-            .map_err(|e| format!("osascript_failed: {e}"))?;
-        if !out.status.success() {
-            return Err("canceled".into());
-        }
-        let key = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if key.is_empty() {
-            return Err("canceled".into());
-        }
         let cfg = super::config_store::load();
+        let prompt = luozi_core::text_ai_preset(&cfg.text_ai.provider_id)
+            .map(|p| p.key_prompt_zh)
+            .unwrap_or("粘贴文本 AI API Key（仅存本机钥匙串）");
+        let key = osascript_prompt(prompt)?;
         super::credentials::set_secret(&cfg.text_ai.credential_ref, &key)?;
-        let _ = super::config_store::update(|c| {
-            if c.text_ai.provider_id.is_empty() {
-                c.text_ai = luozi_core::TextAiConfig::default();
-            }
-        });
         emit_transient(app, "inserted", "文本 AI Key 已写入钥匙串");
         Ok(())
     }

@@ -16,7 +16,10 @@ pub use config::{
 };
 pub use draft::DraftDocument;
 pub use engine::{route_asr, route_asr_after_local_failure, AsrBackendChoice};
-pub use metrics::{nearest_rank, MetricPhase, PhaseTimings};
+pub use metrics::{
+    character_error_rate, edit_distance, nearest_rank, protected_token_errors, MetricPhase,
+    PhaseTimings,
+};
 pub use providers::{
     asr_mode_from_str, asr_preset, cloud_asr_from_preset, text_ai_from_preset, text_ai_preset,
     AsrProtocol, AsrProviderPreset, TextAiProviderPreset, ASR_PROVIDERS, TEXT_AI_PROVIDERS,

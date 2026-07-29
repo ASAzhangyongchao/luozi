@@ -12,6 +12,7 @@ pub mod model_store;
 pub mod permissions;
 mod recorder;
 pub mod settings_api;
+pub mod telemetry;
 pub mod text_ai;
 
 pub use controller::{

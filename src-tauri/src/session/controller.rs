@@ -6,8 +6,8 @@ use std::time::Instant;
 
 use luozi_core::{
     assess_edit_risk, resolve_edit_scope, route_asr, route_asr_after_local_failure, route_delivery,
-    AppConfig, AsrBackendChoice, AsrMode, DeliveryAction, EditRisk, SessionCommand, SessionEffect,
-    SessionMachine, SessionPhase, TargetValidation,
+    AppConfig, AsrBackendChoice, AsrMode, DeliveryAction, EditRisk, MetricPhase, SessionCommand,
+    SessionEffect, SessionMachine, SessionPhase, TargetValidation,
 };
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -62,6 +62,8 @@ pub struct AppSessionState {
     pub model_fetching: AtomicBool,
     /// Continue dictation vs voice-edit instruction (M7).
     pub intent: Mutex<SessionIntent>,
+    /// Content-free session phase timings (P0).
+    pub telemetry: Mutex<super::telemetry::SessionTelemetry>,
     #[allow(dead_code)]
     pub config: AppConfig,
 }
@@ -80,6 +82,7 @@ impl Default for AppSessionState {
             source_pid: Mutex::new(None),
             model_fetching: AtomicBool::new(false),
             intent: Mutex::new(SessionIntent::Continue),
+            telemetry: Mutex::new(super::telemetry::SessionTelemetry::default()),
             config: super::config_store::load(),
         }
     }
@@ -110,6 +113,25 @@ fn emit_phase(app: &AppHandle, phase: &str, message: &str) {
         "session://phase",
         serde_json::json!({ "phase": phase, "message": message }),
     );
+}
+
+fn telemetry_begin(state: &AppSessionState, session_id: u64) {
+    let _ = state.telemetry.lock().map(|mut t| t.begin(session_id));
+}
+
+fn telemetry_mark(state: &AppSessionState, session_id: u64, phase: MetricPhase) {
+    let _ = state.telemetry.lock().map(|mut t| t.mark(session_id, phase));
+}
+
+fn telemetry_finish_emit(app: &AppHandle, state: &AppSessionState, session_id: u64) {
+    if let Some(metrics) = state
+        .telemetry
+        .lock()
+        .ok()
+        .and_then(|mut value| value.finish(session_id))
+    {
+        let _ = app.emit("session://metrics", metrics);
+    }
 }
 
 /// Show overlay with a short-lived status, then hide (does not block).
@@ -268,6 +290,7 @@ fn finish_transcribe_async(
         );
         if pcm.is_empty() {
             let _ = fail_transcribe(&app, &state, "no_speech".into());
+            telemetry_finish_emit(&app, &state, session_id);
             return;
         }
 
@@ -278,11 +301,13 @@ fn finish_transcribe_async(
         let transcript = match run_asr_with_route(&state, &cfg, &pcm, &language, choice) {
             Ok(text) => {
                 eprintln!("luozi: asr ok → {text}");
+                telemetry_mark(&state, session_id, MetricPhase::AsrFinished);
                 text
             }
             Err(err) => {
                 eprintln!("luozi: asr failed: {err}");
                 let _ = fail_transcribe(&app, &state, err);
+                telemetry_finish_emit(&app, &state, session_id);
                 return;
             }
         };
@@ -317,7 +342,10 @@ fn finish_transcribe_async(
                 })
             });
             disarm_escape(&app);
+            telemetry_mark(&state, session_id, MetricPhase::CleanupFinished);
             apply_voice_edit(&app, &state, &cfg, &transcript);
+            telemetry_mark(&state, session_id, MetricPhase::DeliveryFinished);
+            telemetry_finish_emit(&app, &state, session_id);
             return;
         }
 
@@ -336,6 +364,7 @@ fn finish_transcribe_async(
                 eprintln!("luozi: delivering transcript ({duration_ms}ms hold)");
                 disarm_escape(&app);
                 show_overlay(&app, false);
+                telemetry_mark(&state, session_id, MetricPhase::CleanupFinished);
                 std::thread::sleep(std::time::Duration::from_millis(80));
                 let ok = apply_delivery(&app, &state, &text);
                 let _ = state.machine.lock().map(|mut m| {
@@ -344,6 +373,8 @@ fn finish_transcribe_async(
                         ok: ok.machine_ok(),
                     })
                 });
+                telemetry_mark(&state, session_id, MetricPhase::DeliveryFinished);
+                telemetry_finish_emit(&app, &state, session_id);
                 let app2 = app.clone();
                 std::thread::spawn(move || {
                     std::thread::sleep(std::time::Duration::from_millis(OVERLAY_AUTO_HIDE_MS));
@@ -358,6 +389,7 @@ fn finish_transcribe_async(
                 eprintln!("luozi: transcript stale (canceled during ASR)");
                 disarm_escape(&app);
                 show_overlay(&app, false);
+                telemetry_finish_emit(&app, &state, session_id);
             }
             other => {
                 eprintln!("luozi: unexpected_transcribe_effect: {other:?}");
@@ -366,6 +398,7 @@ fn finish_transcribe_async(
                     &state,
                     format!("unexpected_transcribe_effect: {other:?}"),
                 );
+                telemetry_finish_emit(&app, &state, session_id);
             }
         }
     });
@@ -1297,7 +1330,9 @@ pub fn start_session_with_token(
             }
 
             let _ = state.source_target.lock().map(|mut g| *g = Some(token));
+            telemetry_begin(state, session_id);
             show_overlay(app, true);
+            telemetry_mark(state, session_id, MetricPhase::HudVisible);
             arm_escape(app);
             let editing = state
                 .intent
@@ -1310,6 +1345,7 @@ pub fn start_session_with_token(
             } else {
                 emit_phase(app, "recording", "听写中 · Esc 取消");
             }
+            telemetry_mark(state, session_id, MetricPhase::RecordingReady);
 
             // Best-effort focus capture in background (never blocks start).
             let app_cap = app.clone();
@@ -1484,12 +1520,20 @@ pub fn cancel_session(app: &AppHandle, state: &AppSessionState) -> Result<Sessio
     if let Ok(mut rec) = state.recorder.lock() {
         rec.cancel();
     }
+    let active_session_id = state
+        .machine
+        .lock()
+        .ok()
+        .and_then(|m| m.active_session_id());
     let effect = {
         let mut machine = state.machine.lock().map_err(|_| "session_lock_failed")?;
         machine.handle(SessionCommand::Cancel)
     };
     let _ = state.source_target.lock().map(|mut g| *g = None);
     disarm_escape(app);
+    if let Some(session_id) = active_session_id {
+        telemetry_finish_emit(app, state, session_id);
+    }
     match effect {
         SessionEffect::Canceled { .. } => {
             emit_transient(app, "canceled", "已取消");

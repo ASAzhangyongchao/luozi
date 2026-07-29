@@ -224,10 +224,7 @@ fn upload_qwen_asr_chat(
         }],
         "asr_options": asr_options
     });
-    let url = format!(
-        "{}/chat/completions",
-        cfg.base_url.trim_end_matches('/')
-    );
+    let url = format!("{}/chat/completions", cfg.base_url.trim_end_matches('/'));
     eprintln!(
         "luozi: cloud asr qwen → host={} model={} bytes={}",
         cfg.host().unwrap_or_default(),
@@ -475,10 +472,8 @@ mod tests {
 
     #[test]
     fn parse_chat_content() {
-        let t = parse_chat_content_json(
-            r#"{"choices":[{"message":{"content":" 落字 "}}]}"#,
-        )
-        .unwrap();
+        let t =
+            parse_chat_content_json(r#"{"choices":[{"message":{"content":" 落字 "}}]}"#).unwrap();
         assert_eq!(t, "落字");
     }
 

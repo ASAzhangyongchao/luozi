@@ -21,7 +21,11 @@ impl PhaseTimings {
         if self.values.iter().any(|(p, _)| *p == phase) {
             return Err("phase_already_recorded");
         }
-        if self.values.last().is_some_and(|(_, last)| elapsed_ms < *last) {
+        if self
+            .values
+            .last()
+            .is_some_and(|(_, last)| elapsed_ms < *last)
+        {
             return Err("phase_not_monotonic");
         }
         self.values.push((phase, elapsed_ms));
@@ -66,7 +70,10 @@ pub fn character_error_rate(expected: &str, actual: &str) -> f32 {
 }
 
 pub fn protected_token_errors(expected: &[&str], actual: &str) -> usize {
-    expected.iter().filter(|token| !actual.contains(**token)).count()
+    expected
+        .iter()
+        .filter(|token| !actual.contains(**token))
+        .count()
 }
 
 #[cfg(test)]
@@ -100,7 +107,13 @@ mod tests {
     #[test]
     fn protected_token_score_requires_exact_tokens() {
         let expected = ["2026-07-29", "ASFF", "12800"];
-        assert_eq!(protected_token_errors(&expected, "日期 2026-07-29，ASFF 金额 12800"), 0);
-        assert_eq!(protected_token_errors(&expected, "日期 2026-07-28，金额 12800"), 2);
+        assert_eq!(
+            protected_token_errors(&expected, "日期 2026-07-29，ASFF 金额 12800"),
+            0
+        );
+        assert_eq!(
+            protected_token_errors(&expected, "日期 2026-07-28，金额 12800"),
+            2
+        );
     }
 }

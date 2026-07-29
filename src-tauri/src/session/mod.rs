@@ -1,13 +1,13 @@
 //! Product session path (M2+): recorder, clipboard undo, controller, local/cloud ASR.
 
 pub mod asr;
+mod clipboard;
 pub mod cloud;
 pub mod config_store;
 pub mod consent;
+pub mod controller;
 pub mod credentials;
 pub mod draft;
-mod clipboard;
-pub mod controller;
 pub mod model_store;
 pub mod permissions;
 mod recorder;

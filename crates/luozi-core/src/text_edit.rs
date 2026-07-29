@@ -83,10 +83,7 @@ fn paragraph_bounds(text: &str, cursor: usize) -> (usize, usize) {
         .map(|(i, _)| i + 2)
         .unwrap_or(0);
     let after = &text[cursor..];
-    let p_end = after
-        .find("\n\n")
-        .map(|i| cursor + i)
-        .unwrap_or(text.len());
+    let p_end = after.find("\n\n").map(|i| cursor + i).unwrap_or(text.len());
     // Trim trailing single newlines inside paragraph end for cleaner scopes.
     (p_start, p_end)
 }

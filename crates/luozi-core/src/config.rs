@@ -114,7 +114,13 @@ pub fn url_host(base_url: &str) -> Option<String> {
     let rest = base_url
         .strip_prefix("https://")
         .or_else(|| base_url.strip_prefix("http://"))?;
-    let host = rest.split('/').next()?.split('@').next_back()?.split(':').next()?;
+    let host = rest
+        .split('/')
+        .next()?
+        .split('@')
+        .next_back()?
+        .split(':')
+        .next()?;
     if host.is_empty() {
         None
     } else {

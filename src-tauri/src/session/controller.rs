@@ -120,7 +120,10 @@ fn telemetry_begin(state: &AppSessionState, session_id: u64) {
 }
 
 fn telemetry_mark(state: &AppSessionState, session_id: u64, phase: MetricPhase) {
-    let _ = state.telemetry.lock().map(|mut t| t.mark(session_id, phase));
+    let _ = state
+        .telemetry
+        .lock()
+        .map(|mut t| t.mark(session_id, phase));
 }
 
 fn telemetry_finish_emit(app: &AppHandle, state: &AppSessionState, session_id: u64) {
@@ -283,11 +286,8 @@ fn finish_transcribe_async(
         };
 
         let cfg = super::config_store::load();
-        let pcm = asr::resample_to_16k_mono(
-            &capture.samples,
-            capture.sample_rate,
-            capture.channels,
-        );
+        let pcm =
+            asr::resample_to_16k_mono(&capture.samples, capture.sample_rate, capture.channels);
         if pcm.is_empty() {
             let _ = fail_transcribe(&app, &state, "no_speech".into());
             telemetry_finish_emit(&app, &state, session_id);
@@ -379,7 +379,13 @@ fn finish_transcribe_async(
                 std::thread::spawn(move || {
                     std::thread::sleep(std::time::Duration::from_millis(OVERLAY_AUTO_HIDE_MS));
                     if let Some(state) = app2.try_state::<AppSessionState>() {
-                        if state.machine.lock().ok().map(|m| m.is_idle()).unwrap_or(true) {
+                        if state
+                            .machine
+                            .lock()
+                            .ok()
+                            .map(|m| m.is_idle())
+                            .unwrap_or(true)
+                        {
                             show_overlay(&app2, false);
                         }
                     }
@@ -522,21 +528,20 @@ fn dummy_token() -> TargetToken {
 /// Best-effort focus capture with timeout. Never blocks the AppKit main run loop from itself.
 pub fn capture_source_token(app: &AppHandle) -> TargetToken {
     let app_c = app.clone();
-    match on_main_thread_timeout(app, MAIN_THREAD_AX_TIMEOUT, move || {
-        match spike::capture_target() {
+    match on_main_thread_timeout(
+        app,
+        MAIN_THREAD_AX_TIMEOUT,
+        move || match spike::capture_target() {
             Ok(t) => Ok(t),
             Err(err) => Err(err),
-        }
-    }) {
+        },
+    ) {
         Ok(Ok(t)) if t.is_secure => {
             // Caller decides whether to cancel / reject; do not flash overlay here.
             t
         }
         Ok(Ok(t)) => {
-            eprintln!(
-                "luozi: capture ok pid={} role={}",
-                t.process_id, t.role
-            );
+            eprintln!("luozi: capture ok pid={} role={}", t.process_id, t.role);
             t
         }
         Ok(Err(err)) => {
@@ -704,7 +709,10 @@ fn apply_voice_edit(app: &AppHandle, _state: &AppSessionState, cfg: &AppConfig, 
     match assess_edit_risk(&scope, &original, &proposed, instruction) {
         EditRisk::Low => match draft.insert_at(scope.start, scope.end, &proposed) {
             Ok(_) => {
-                let _ = app.emit("draft://updated", serde_json::json!({ "reason": "voice_edit" }));
+                let _ = app.emit(
+                    "draft://updated",
+                    serde_json::json!({ "reason": "voice_edit" }),
+                );
                 emit_transient(app, "inserted", "已修改");
             }
             Err(err) => {
@@ -884,9 +892,7 @@ fn apply_delivery(app: &AppHandle, state: &AppSessionState, text: &str) -> Deliv
             emit_transient(app, "discarded", "安全输入：已丢弃，未写入");
             DeliveryResult::Inserted
         }
-        Ok(DeliverOutcome::Clipboard)
-        | Ok(DeliverOutcome::Error(_))
-        | Err(_) => {
+        Ok(DeliverOutcome::Clipboard) | Ok(DeliverOutcome::Error(_)) | Err(_) => {
             // Electron / unverified AX: clipboard + ⌘V, then VERIFY before saying 已落字.
             // CGEvent "Ok" only means events were posted — never treat as success alone.
             restore_source_app(state);
@@ -926,21 +932,13 @@ fn write_clipboard_with_paste(
                     emit_transient(app, "inserted", "已落字");
                     DeliveryResult::Inserted
                 } else if !trusted {
-                    emit_transient(
-                        app,
-                        "error",
-                        "辅助功能未生效：关掉再打开 Luozi 开关",
-                    );
+                    emit_transient(app, "error", "辅助功能未生效：关掉再打开 Luozi 开关");
                     let _ = std::process::Command::new("open")
                         .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
                         .spawn();
                     DeliveryResult::Clipboard
                 } else {
-                    emit_transient(
-                        app,
-                        "clipboard",
-                        "未进输入框，已到剪贴板 · 请 ⌘V",
-                    );
+                    emit_transient(app, "clipboard", "未进输入框，已到剪贴板 · 请 ⌘V");
                     DeliveryResult::Clipboard
                 }
             }
@@ -976,7 +974,11 @@ pub fn is_recording_phase(state: &AppSessionState) -> bool {
         .unwrap_or(false)
 }
 
-fn fail_transcribe(app: &AppHandle, state: &AppSessionState, err: String) -> Result<SessionStatus, String> {
+fn fail_transcribe(
+    app: &AppHandle,
+    state: &AppSessionState,
+    err: String,
+) -> Result<SessionStatus, String> {
     let _ = state
         .machine
         .lock()
@@ -1052,11 +1054,7 @@ pub fn set_cloud_asr_provider(app: &AppHandle, provider_id: &str) -> Result<(), 
     let _ = super::config_store::update(|c| {
         c.cloud_asr = next;
     })?;
-    emit_transient(
-        app,
-        "inserted",
-        &format!("云端 ASR：{}", preset.label_zh),
-    );
+    emit_transient(app, "inserted", &format!("云端 ASR：{}", preset.label_zh));
     Ok(())
 }
 
@@ -1076,11 +1074,7 @@ pub fn set_text_ai_provider(app: &AppHandle, provider_id: &str) -> Result<(), St
             }
         }
     }
-    emit_transient(
-        app,
-        "inserted",
-        &format!("文本 AI：{}", preset.label_zh),
-    );
+    emit_transient(app, "inserted", &format!("文本 AI：{}", preset.label_zh));
     Ok(())
 }
 
@@ -1162,11 +1156,7 @@ pub fn consent_current_cloud(app: &AppHandle) -> Result<(), String> {
         .host()
         .ok_or_else(|| "cloud_protocol_error".to_string())?;
     super::consent::grant(&cfg.cloud_asr.provider_id, &host)?;
-    emit_transient(
-        app,
-        "inserted",
-        &format!("已同意上传到 {host}"),
-    );
+    emit_transient(app, "inserted", &format!("已同意上传到 {host}"));
     Ok(())
 }
 
@@ -1321,11 +1311,7 @@ pub fn start_session_with_token(
                     .map(|mut m| m.handle(SessionCommand::Cancel));
                 let _ = state.source_target.lock().map(|mut g| *g = None);
                 disarm_escape(app);
-                emit_transient(
-                    app,
-                    "canceled",
-                    "已授权麦克风。请再按住说话，松手落字",
-                );
+                emit_transient(app, "canceled", "已授权麦克风。请再按住说话，松手落字");
                 return status_from(state, "canceled_after_permission".into());
             }
 
@@ -1548,7 +1534,10 @@ pub fn cancel_session(app: &AppHandle, state: &AppSessionState) -> Result<Sessio
 }
 
 pub fn undo_last(app: &AppHandle, state: &AppSessionState) -> Result<SessionStatus, String> {
-    let mut gate = state.clipboard.lock().map_err(|_| "clipboard_lock_failed")?;
+    let mut gate = state
+        .clipboard
+        .lock()
+        .map_err(|_| "clipboard_lock_failed")?;
     gate.undo_last()?;
     emit_phase(app, "undone", "已撤销剪贴板落字");
     drop(gate);
@@ -1578,17 +1567,26 @@ fn status_from(state: &AppSessionState, message: String) -> Result<SessionStatus
 }
 
 #[tauri::command]
-pub fn session_start(app: AppHandle, state: State<'_, AppSessionState>) -> Result<SessionStatus, String> {
+pub fn session_start(
+    app: AppHandle,
+    state: State<'_, AppSessionState>,
+) -> Result<SessionStatus, String> {
     start_session(&app, &state)
 }
 
 #[tauri::command]
-pub fn session_stop(app: AppHandle, state: State<'_, AppSessionState>) -> Result<SessionStatus, String> {
+pub fn session_stop(
+    app: AppHandle,
+    state: State<'_, AppSessionState>,
+) -> Result<SessionStatus, String> {
     stop_session(&app, &state)
 }
 
 #[tauri::command]
-pub fn session_cancel(app: AppHandle, state: State<'_, AppSessionState>) -> Result<SessionStatus, String> {
+pub fn session_cancel(
+    app: AppHandle,
+    state: State<'_, AppSessionState>,
+) -> Result<SessionStatus, String> {
     cancel_session(&app, &state)
 }
 

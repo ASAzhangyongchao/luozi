@@ -18,7 +18,9 @@ pub enum SessionPhase {
 pub enum SessionCommand {
     Start,
     /// Stop recording. `duration_ms` is wall time since start.
-    Stop { duration_ms: u64 },
+    Stop {
+        duration_ms: u64,
+    },
     Cancel,
     /// ASR (or M2 fake text) finished for a session.
     TranscriptionReady {
@@ -39,10 +41,7 @@ pub enum SessionEffect {
     RejectedTooShort { session_id: SessionId },
     Canceled { session_id: SessionId },
     BeginTranscribe { session_id: SessionId },
-    Deliver {
-        session_id: SessionId,
-        text: String,
-    },
+    Deliver { session_id: SessionId, text: String },
     Completed { session_id: SessionId },
     Failed { session_id: SessionId },
     StaleIgnored { session_id: SessionId },
@@ -140,9 +139,7 @@ impl SessionMachine {
 
     fn on_transcription_ready(&mut self, session_id: SessionId, text: String) -> SessionEffect {
         match self.phase {
-            SessionPhase::Transcribing {
-                session_id: active,
-            } if active == session_id => {
+            SessionPhase::Transcribing { session_id: active } if active == session_id => {
                 self.phase = SessionPhase::Delivering { session_id };
                 SessionEffect::Deliver { session_id, text }
             }
@@ -152,9 +149,7 @@ impl SessionMachine {
 
     fn on_delivery_finished(&mut self, session_id: SessionId, ok: bool) -> SessionEffect {
         match self.phase {
-            SessionPhase::Delivering {
-                session_id: active,
-            } if active == session_id => {
+            SessionPhase::Delivering { session_id: active } if active == session_id => {
                 self.phase = SessionPhase::Idle;
                 if ok {
                     SessionEffect::Completed { session_id }

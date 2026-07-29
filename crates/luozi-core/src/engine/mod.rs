@@ -48,10 +48,7 @@ pub fn route_asr(mode: AsrMode, local_ready: bool, cloud_ready: bool) -> AsrBack
 }
 
 /// Fallback after local failure / missing model (Auto only uploads if cloud ready).
-pub fn route_asr_after_local_failure(
-    mode: AsrMode,
-    cloud_ready: bool,
-) -> AsrBackendChoice {
+pub fn route_asr_after_local_failure(mode: AsrMode, cloud_ready: bool) -> AsrBackendChoice {
     match mode {
         AsrMode::Auto if cloud_ready => AsrBackendChoice::Cloud,
         AsrMode::CloudOnly if cloud_ready => AsrBackendChoice::Cloud,

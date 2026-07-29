@@ -8,6 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
+    "test:frontend": "vitest run",
     "run:macos-app": "bash scripts/run-macos-app.sh",
     "install:macos-app": "bash scripts/install-macos-app.sh",
     "fetch:model": "bash scripts/fetch-ggml-small.sh"
@@ -19,6 +20,7 @@
   "devDependencies": {
     "@tauri-apps/cli": "^2",
     "typescript": "~5.6.2",
-    "vite": "^6.0.3"
+    "vite": "^6.0.3",
+    "vitest": "^3.2.4"
   }
 }

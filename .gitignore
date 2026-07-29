@@ -41,3 +41,6 @@ models/
 *.njsproj
 *.sln
 *.sw?
+
+tests/benchmarks/private-audio/
+tests/benchmarks/private-results/

@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "recordingsPerPrompt": 5,
+  "prompts": [
+    {"id":"zh-message-01","category":"zh-message","expected":"今天下午三点开会，请提前十分钟提醒我。","protected":["三点","十分钟"]},
+    {"id":"zh-message-02","category":"zh-message","expected":"这个问题我明天确认以后再回复你。","protected":[]},
+    {"id":"self-correct-01","category":"self-correction","expected":"我们下午三点出发。","spoken":"我们下午两点，不对，三点出发。","protected":["三点"]},
+    {"id":"self-correct-02","category":"self-correction","expected":"请发给王晓明。","spoken":"请发给王小明，不对，是晓得的晓。","protected":["王晓明"]},
+    {"id":"mixed-01","category":"mixed-language","expected":"请检查 ASFF 的 API 返回结果。","protected":["ASFF","API"]},
+    {"id":"mixed-02","category":"mixed-language","expected":"把 feature branch 合并到 main。","protected":["feature branch","main"]},
+    {"id":"number-01","category":"number","expected":"订单金额是 12800 元。","protected":["12800"]},
+    {"id":"number-02","category":"number","expected":"发布日期是 2026-07-29。","protected":["2026-07-29"]},
+    {"id":"number-03","category":"number","expected":"成功率从 98.5% 提高到 99.2%。","protected":["98.5%","99.2%"]},
+    {"id":"url-01","category":"url","expected":"网址是 github.com/ASAzhangyongchao/luozi。","protected":["github.com/ASAzhangyongchao/luozi"]},
+    {"id":"email-01","category":"email","expected":"请发送到 luozi@example.com。","protected":["luozi@example.com"]},
+    {"id":"list-01","category":"list","expected":"今天做三件事：第一，检查接口；第二，修复问题；第三，发布版本。","protected":[]},
+    {"id":"paragraph-01","category":"paragraph","expected":"先完成语音识别。然后检查文字质量。最后再写入输入框。","protected":[]},
+    {"id":"product-01","category":"proper-noun","expected":"Luozi 使用 Tauri 和 Whisper。","protected":["Luozi","Tauri","Whisper"]},
+    {"id":"product-02","category":"proper-noun","expected":"请更新 IAM-Center 的配置。","protected":["IAM-Center"]},
+    {"id":"quiet-01","category":"quiet-speech","expected":"这是一段较小音量的测试。","protected":[]},
+    {"id":"noise-01","category":"light-noise","expected":"背景有轻微噪音，但内容应该保持完整。","protected":[]},
+    {"id":"punctuation-01","category":"punctuation","expected":"你确认了吗？如果确认，请直接回复。","protected":[]},
+    {"id":"draft-01","category":"draft","expected":"把这一段改得更简洁，但不要改变数字 42。","protected":["42"]},
+    {"id":"code-01","category":"developer","expected":"变量名使用 camelCase，文件名是 settings.ts。","protected":["camelCase","settings.ts"]}
+  ]
+}

@@ -4,6 +4,11 @@
 
 ### Added
 
+- Local dictation history (≤50 entries, 2k chars/entry) in App Support `history.json`; draft rail「历史」with copy / load-to-draft
+- Typeless-inspired recording HUD: cancel · waveform · confirm (hold-to-talk; confirm = release/stop)
+- Tray left-click and Dock reopen open the voice draft workbench (right-click menu unchanged for Settings / How to use)
+- Draft workbench left rail (Typeless-inspired): 草稿 / 历史占位 / 设置 / 教程 — settings & guide open without relying on the menu-bar icon
+- In-app beginner guide window from tray 「如何使用…」 (chaptered: start / hotkeys / draft / voice edit / settings / FAQ)
 - M8 settings shell (Mac shortest): dedicated Settings window (general / voice+AI / hotkeys read-only / permissions / about); tray Settings & About enabled; Spike demoted to developer entry
 - M7 voice edit (Mac shortest): second hotkey `Control+Alt+Shift+Space`, separate text-AI Keychain + consent, OpenAI-compatible chat rewrite, selection/paragraph scope, protected-token high-risk confirm
 - M6 draft workbench: autosave, 20-step undo/redo, copy/clear, last-transcript load, dictation into focused draft

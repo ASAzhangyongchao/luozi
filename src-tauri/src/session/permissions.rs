@@ -44,8 +44,7 @@ mod macos {
                 return MicAuth::Unknown;
             };
             let media = NSString::from_str(AV_MEDIA_TYPE_AUDIO);
-            let status: isize =
-                objc2::msg_send![cls, authorizationStatusForMediaType: &*media];
+            let status: isize = objc2::msg_send![cls, authorizationStatusForMediaType: &*media];
             match status {
                 0 => MicAuth::NotDetermined,
                 1 => MicAuth::Restricted,

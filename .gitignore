@@ -12,6 +12,7 @@ dist
 dist-ssr
 *.local
 .worktrees/
+.superpowers/
 target/
 src-tauri/target/
 src-tauri/icons/android/

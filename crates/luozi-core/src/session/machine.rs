@@ -6,19 +6,28 @@ pub type SessionId = u64;
 /// Minimum hold duration before stop is treated as a real utterance (spec: 0.3s).
 pub const MIN_RECORDING_MS: u64 = 300;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum SessionPhase {
+    #[default]
     Idle,
-    Recording { session_id: SessionId },
-    Transcribing { session_id: SessionId },
-    Delivering { session_id: SessionId },
+    Recording {
+        session_id: SessionId,
+    },
+    Transcribing {
+        session_id: SessionId,
+    },
+    Delivering {
+        session_id: SessionId,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SessionCommand {
     Start,
     /// Stop recording. `duration_ms` is wall time since start.
-    Stop { duration_ms: u64 },
+    Stop {
+        duration_ms: u64,
+    },
     Cancel,
     /// ASR (or M2 fake text) finished for a session.
     TranscriptionReady {
@@ -39,10 +48,7 @@ pub enum SessionEffect {
     RejectedTooShort { session_id: SessionId },
     Canceled { session_id: SessionId },
     BeginTranscribe { session_id: SessionId },
-    Deliver {
-        session_id: SessionId,
-        text: String,
-    },
+    Deliver { session_id: SessionId, text: String },
     Completed { session_id: SessionId },
     Failed { session_id: SessionId },
     StaleIgnored { session_id: SessionId },
@@ -52,12 +58,6 @@ pub enum SessionEffect {
 pub struct SessionMachine {
     phase: SessionPhase,
     next_id: SessionId,
-}
-
-impl Default for SessionPhase {
-    fn default() -> Self {
-        Self::Idle
-    }
 }
 
 impl SessionMachine {
@@ -140,9 +140,7 @@ impl SessionMachine {
 
     fn on_transcription_ready(&mut self, session_id: SessionId, text: String) -> SessionEffect {
         match self.phase {
-            SessionPhase::Transcribing {
-                session_id: active,
-            } if active == session_id => {
+            SessionPhase::Transcribing { session_id: active } if active == session_id => {
                 self.phase = SessionPhase::Delivering { session_id };
                 SessionEffect::Deliver { session_id, text }
             }
@@ -152,9 +150,7 @@ impl SessionMachine {
 
     fn on_delivery_finished(&mut self, session_id: SessionId, ok: bool) -> SessionEffect {
         match self.phase {
-            SessionPhase::Delivering {
-                session_id: active,
-            } if active == session_id => {
+            SessionPhase::Delivering { session_id: active } if active == session_id => {
                 self.phase = SessionPhase::Idle;
                 if ok {
                     SessionEffect::Completed { session_id }

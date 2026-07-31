@@ -165,7 +165,7 @@ fn upload_transcription(
         &wav_bytes,
     );
     writeln!(body, "--{boundary}--\r").map_err(|e| e.to_string())?;
-    write!(body, "\n").map_err(|e| e.to_string())?;
+    writeln!(body).map_err(|e| e.to_string())?;
 
     let url = format!(
         "{}/audio/transcriptions",
@@ -224,10 +224,7 @@ fn upload_qwen_asr_chat(
         }],
         "asr_options": asr_options
     });
-    let url = format!(
-        "{}/chat/completions",
-        cfg.base_url.trim_end_matches('/')
-    );
+    let url = format!("{}/chat/completions", cfg.base_url.trim_end_matches('/'));
     eprintln!(
         "luozi: cloud asr qwen → host={} model={} bytes={}",
         cfg.host().unwrap_or_default(),
@@ -475,10 +472,8 @@ mod tests {
 
     #[test]
     fn parse_chat_content() {
-        let t = parse_chat_content_json(
-            r#"{"choices":[{"message":{"content":" 落字 "}}]}"#,
-        )
-        .unwrap();
+        let t =
+            parse_chat_content_json(r#"{"choices":[{"message":{"content":" 落字 "}}]}"#).unwrap();
         assert_eq!(t, "落字");
     }
 
@@ -491,8 +486,10 @@ mod tests {
 
     #[test]
     fn unsupported_not_ready() {
-        let mut cfg = CloudAsrConfig::default();
-        cfg.protocol = AsrProtocol::Unsupported;
+        let cfg = CloudAsrConfig {
+            protocol: AsrProtocol::Unsupported,
+            ..CloudAsrConfig::default()
+        };
         assert!(!cloud_ready(&cfg));
     }
 }

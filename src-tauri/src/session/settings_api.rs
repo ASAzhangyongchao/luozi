@@ -145,9 +145,7 @@ pub fn open_url(url: &str) -> Result<(), String> {
 pub fn open_privacy_microphone() -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        open_url(
-            "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
-        )
+        open_url("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -158,9 +156,7 @@ pub fn open_privacy_microphone() -> Result<(), String> {
 pub fn open_privacy_accessibility() -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        open_url(
-            "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
-        )
+        open_url("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
     }
     #[cfg(not(target_os = "macos"))]
     {

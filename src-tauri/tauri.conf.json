@@ -16,7 +16,7 @@
       {
         "label": "main",
         "title": "落字 · 语音草稿",
-        "width": 760,
+        "width": 840,
         "height": 600,
         "visible": false,
         "skipTaskbar": true
@@ -25,8 +25,8 @@
         "label": "overlay",
         "title": "Luozi Overlay",
         "url": "overlay.html",
-        "width": 360,
-        "height": 72,
+        "width": 300,
+        "height": 56,
         "visible": false,
         "alwaysOnTop": true,
         "decorations": false,
@@ -41,6 +41,15 @@
         "title": "落字 · 设置",
         "url": "settings.html",
         "width": 760,
+        "height": 560,
+        "visible": false,
+        "skipTaskbar": true
+      },
+      {
+        "label": "guide",
+        "title": "落字 · 如何使用",
+        "url": "guide.html",
+        "width": 720,
         "height": 560,
         "visible": false,
         "skipTaskbar": true

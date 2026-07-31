@@ -39,14 +39,10 @@ pub fn rewrite_scope(
     if !consent::is_consented(&cfg.provider_id, &host) {
         return Err("text_ai_not_consented".into());
     }
-    let api_key = credentials::get_secret(&cfg.credential_ref).map_err(|_| {
-        "text_ai_unauthorized".to_string()
-    })?;
+    let api_key = credentials::get_secret(&cfg.credential_ref)
+        .map_err(|_| "text_ai_unauthorized".to_string())?;
 
-    let url = format!(
-        "{}/chat/completions",
-        cfg.base_url.trim_end_matches('/')
-    );
+    let url = format!("{}/chat/completions", cfg.base_url.trim_end_matches('/'));
     let body = json!({
         "model": cfg.model,
         "temperature": 0.2,
@@ -64,10 +60,7 @@ pub fn rewrite_scope(
         ]
     });
 
-    eprintln!(
-        "luozi: text_ai → host={} model={}",
-        host, cfg.model
-    );
+    eprintln!("luozi: text_ai → host={} model={}", host, cfg.model);
 
     let agent = ureq::builder()
         .timeout_connect(Duration::from_secs(10))

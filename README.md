@@ -8,8 +8,8 @@ Cross-platform voice-to-text desktop app (Tauri 2 + Rust).
 
 - Hold `Control+Alt+Space`: transcript → draft when workbench focused, else AX / clipboard
 - Hold `Control+Alt+Shift+Space`: speak an edit instruction → text AI rewrites the draft scope
-- Tray: **Settings…**, About, open draft, ASR mode, keys & consent, download model
-- Manual checklists: `docs/spikes/m5-manual.md` … `m8-manual.md`
+- Tray: **left-click** opens draft; **right-click** menu has Settings / How to use / engine. Dock click also opens draft. Draft left rail opens Settings, How-to, and local History.
+- Manual checklists: `docs/spikes/m5-manual.md` … `m8-manual.md`, `guide-manual.md`
 
 **Cloud:** ASR and text AI require separate consent; keys only in Keychain.
 
@@ -26,7 +26,7 @@ npm run install:macos-app
 
 ## Not yet
 
-First-run wizard, liquid-glass polish, hotkey remapping UI, GitHub Release installers, notarization.
+First-run auto onboarding (in-app tray guide available), liquid-glass polish, hotkey remapping UI, GitHub Release installers, notarization.
 
 ## License
 

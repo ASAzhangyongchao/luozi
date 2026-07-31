@@ -83,10 +83,7 @@ fn paragraph_bounds(text: &str, cursor: usize) -> (usize, usize) {
         .map(|(i, _)| i + 2)
         .unwrap_or(0);
     let after = &text[cursor..];
-    let p_end = after
-        .find("\n\n")
-        .map(|i| cursor + i)
-        .unwrap_or(text.len());
+    let p_end = after.find("\n\n").map(|i| cursor + i).unwrap_or(text.len());
     // Trim trailing single newlines inside paragraph end for cleaner scopes.
     (p_start, p_end)
 }
@@ -219,9 +216,9 @@ mod tests {
         let text = "订单 ASFF 金额 12800 元，日期 2026-07-27";
         let spans = extract_protected_spans(text);
         let tokens: Vec<&str> = spans.iter().map(|(s, e)| &text[*s..*e]).collect();
-        assert!(tokens.iter().any(|t| *t == "ASFF"));
-        assert!(tokens.iter().any(|t| *t == "12800"));
-        assert!(tokens.iter().any(|t| *t == "2026-07-27"));
+        assert!(tokens.contains(&"ASFF"));
+        assert!(tokens.contains(&"12800"));
+        assert!(tokens.contains(&"2026-07-27"));
     }
 
     #[test]

@@ -6,13 +6,46 @@
     <title>落字 · 语音草稿</title>
   </head>
   <body>
-    <div class="workbench" id="workbench">
+    <div class="app-shell">
+      <aside class="app-rail" aria-label="主导航">
+        <nav class="rail-nav">
+          <button type="button" class="rail-item active" data-nav="draft" title="语音草稿" aria-current="page">
+            <span class="rail-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+            </span>
+            <span class="rail-label">草稿</span>
+          </button>
+          <button type="button" class="rail-item" id="btnRailHistory" data-nav="history" title="落字历史">
+            <span class="rail-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.2 1.8"/></svg>
+            </span>
+            <span class="rail-label">历史</span>
+          </button>
+        </nav>
+        <div class="rail-spacer"></div>
+        <div class="rail-footer">
+          <button type="button" class="rail-item" id="btnRailSettings" title="设置">
+            <span class="rail-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 5 15.4a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.36.56.96.9 1.51.9H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
+            </span>
+            <span class="rail-label">设置</span>
+          </button>
+          <button type="button" class="rail-item" id="btnRailGuide" title="如何使用">
+            <span class="rail-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
+            </span>
+            <span class="rail-label">教程</span>
+          </button>
+        </div>
+      </aside>
+
+      <div class="workbench" id="workbench">
       <header class="wb-toolbar">
         <div class="wb-brand">
           <img class="brand-mark" src="./assets/brand/luozi-mark.svg" width="28" height="28" alt="" />
-          <strong>语音草稿</strong>
+          <strong id="wbTitle">语音草稿</strong>
         </div>
-        <div class="wb-actions">
+        <div class="wb-actions" id="draftActions">
           <button type="button" id="btnUndo" title="撤销">撤销</button>
           <button type="button" id="btnRedo" title="重做">重做</button>
           <button type="button" id="btnCopy" class="primary-ghost">复制</button>
@@ -21,7 +54,7 @@
         </div>
       </header>
 
-      <main class="wb-body">
+      <main class="wb-body" id="draftPane">
         <textarea
           id="editor"
           spellcheck="true"
@@ -30,13 +63,219 @@
         <p id="saveHint" class="wb-hint" aria-live="polite"></p>
       </main>
 
+      <main class="wb-body history-pane" id="historyPane" hidden>
+        <p class="wb-hint history-meta">本机保存，最多 50 条；单条截断以节省空间。</p>
+        <div id="historyList" class="history-list" role="list"></div>
+        <div id="historyEmpty" class="history-empty" hidden>
+          <div class="history-empty-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.2 1.8"/></svg>
+          </div>
+          <p class="history-empty-title">还没有落字记录</p>
+          <p class="history-empty-desc">按住「继续说」热键说几句，转写成功后会出现在这里。可复制或载入到当前草稿。</p>
+        </div>
+      </main>
+
+      <dialog id="settingsDialog" class="settings-dialog">
+        <div class="settings-dialog-bar">
+          <strong>设置</strong>
+          <button type="button" id="btnCloseSettings" class="settings-dialog-close" aria-label="关闭设置">关闭</button>
+        </div>
+        <div class="settings-shell" id="settingsRoot">
+          <nav class="settings-nav" aria-label="设置分区">
+            <button type="button" class="nav-item active" data-section="general">通用</button>
+            <button type="button" class="nav-item" data-section="voice">语音与 AI</button>
+            <button type="button" class="nav-item" data-section="hotkeys">快捷键</button>
+            <button type="button" class="nav-item" data-section="permissions">权限</button>
+            <button type="button" class="nav-item" data-section="about">关于</button>
+          </nav>
+          <main class="settings-main">
+            <section id="section-general" class="settings-section">
+              <h1>通用</h1>
+              <div class="row">
+                <div>
+                  <strong>当前草稿自动恢复</strong>
+                  <p class="muted">关闭窗口会刷盘；重开语音草稿可恢复正文</p>
+                </div>
+                <span class="badge ok">已开启</span>
+              </div>
+              <div class="row">
+                <div>
+                  <strong>界面语言</strong>
+                  <p class="muted">当前固定简体中文</p>
+                </div>
+                <span class="badge">简体中文</span>
+              </div>
+              <details class="coming-soon">
+                <summary>即将支持</summary>
+                <div class="row">
+                  <div>
+                    <strong>登录时启动</strong>
+                    <p class="muted">Login Item；开机后自动在托盘待命</p>
+                  </div>
+                  <span class="badge">规划中</span>
+                </div>
+                <div class="row">
+                  <div>
+                    <strong>完整中英切换</strong>
+                    <p class="muted">界面语言可在简体中文 / English 间切换</p>
+                  </div>
+                  <span class="badge">规划中</span>
+                </div>
+              </details>
+            </section>
+
+            <section id="section-voice" class="settings-section" hidden>
+              <h1>语音与 AI</h1>
+              <h2>语音转写（ASR）</h2>
+              <div class="row">
+                <div>
+                  <div class="label-row">
+                    <strong>引擎模式</strong>
+                    <button type="button" class="help-btn" data-help="决定语音走本地 Whisper、云端，还是自动（本地优先，失败再云端）。不影响文本 AI。" aria-label="说明">?</button>
+                  </div>
+                  <p class="muted" id="asrModeHint">自动（本地优先）</p>
+                </div>
+                <button type="button" id="btnPickAsrMode">选择模式…</button>
+              </div>
+              <div class="row">
+                <div>
+                  <strong>本地模型</strong>
+                  <p class="muted" id="modelStatus">—</p>
+                </div>
+                <span class="badge" id="modelBadge">—</span>
+              </div>
+              <div class="row">
+                <div>
+                  <div class="label-row">
+                    <strong>云端 ASR</strong>
+                    <button type="button" class="help-btn" data-help="支持 Groq Whisper、千问 ASR、豆包语音和小米 MiMo ASR。Key 只存钥匙串，且需单独同意上传。" aria-label="说明">?</button>
+                  </div>
+                  <p class="muted" id="cloudAsrStatus">—</p>
+                </div>
+                <div class="btn-group wrap">
+                  <button type="button" id="btnPickAsrProvider">选择厂商…</button>
+                  <button type="button" id="btnAsrKey">配置 Key…</button>
+                  <button type="button" id="btnAsrConsent">同意上传…</button>
+                </div>
+              </div>
+
+              <h2>文本 AI（修改 / 润色）</h2>
+              <div class="row">
+                <div>
+                  <strong>文本 AI</strong>
+                  <p class="muted" id="textAiStatus">—</p>
+                </div>
+                <div class="btn-group wrap">
+                  <button type="button" id="btnPickTextProvider">选择厂商…</button>
+                  <button type="button" id="btnTextAiKey">配置 Key…</button>
+                  <button type="button" id="btnTextAiModel">模型…</button>
+                  <button type="button" id="btnTextAiConsent">同意上传…</button>
+                </div>
+              </div>
+              <p class="note">
+                ASR 与文本 AI 分开授权；即使同一主机也要各自同意。Key 只存本机钥匙串。
+              </p>
+            </section>
+
+            <section id="section-hotkeys" class="settings-section" hidden>
+              <h1>快捷键</h1>
+              <p class="note">本版只读展示；录制改键放在后续切片。</p>
+              <div class="row">
+                <div>
+                  <strong>继续说</strong>
+                  <p class="muted">按住说话，松手落字 / 写入草稿</p>
+                </div>
+                <div class="btn-group">
+                  <code id="hkContinue">—</code>
+                  <button type="button" data-copy="hkContinue">复制</button>
+                </div>
+              </div>
+              <div class="row">
+                <div>
+                  <strong>说修改要求</strong>
+                  <p class="muted">按住录修改指令，松手调用文本 AI</p>
+                </div>
+                <div class="btn-group">
+                  <code id="hkEdit">—</code>
+                  <button type="button" data-copy="hkEdit">复制</button>
+                </div>
+              </div>
+              <div class="row">
+                <div>
+                  <strong>取消</strong>
+                  <p class="muted">录音 / 转写中取消</p>
+                </div>
+                <code>Escape</code>
+              </div>
+              <p class="muted" id="hkRegistered"></p>
+            </section>
+
+            <section id="section-permissions" class="settings-section" hidden>
+              <h1>权限</h1>
+              <div class="row">
+                <div>
+                  <strong>麦克风</strong>
+                  <p class="muted" id="micStatus">录音需要麦克风权限；首次按住说话时系统会询问</p>
+                </div>
+                <div class="btn-group">
+                  <span class="badge" id="micBadge">—</span>
+                  <button type="button" id="btnOpenMic">打开系统设置</button>
+                </div>
+              </div>
+              <div class="row">
+                <div>
+                  <strong>辅助功能</strong>
+                  <p class="muted" id="axStatus">用于向其他 App 插入文字；失败则降级剪贴板</p>
+                </div>
+                <div class="btn-group">
+                  <span class="badge" id="axBadge">—</span>
+                  <button type="button" id="btnOpenAx">打开系统设置</button>
+                </div>
+              </div>
+              <p class="note" id="axAdhocNote">
+                ad-hoc 重装后签名变化，可能需要在辅助功能里关掉再打开「落字」。
+              </p>
+            </section>
+
+            <section id="section-about" class="settings-section" hidden>
+              <h1>关于落字</h1>
+              <div class="about-hero">
+                <img src="./assets/brand/luozi-mark.svg" width="48" height="48" alt="" />
+                <div>
+                  <strong>落字 Luozi</strong>
+                  <p class="muted">版本 <span id="aboutVersion">—</span></p>
+                </div>
+              </div>
+              <p>
+                本地优先的快捷语音转文字。无落字账号、无官方中转；云端能力由你自备 Key（BYOK）。
+              </p>
+              <div class="btn-group wrap">
+                <button type="button" id="btnRepo">开源仓库</button>
+                <button type="button" id="btnReleases">查看更新</button>
+                <button type="button" id="btnSpike">打开开发 Spike…</button>
+              </div>
+              <h2>隐私摘要</h2>
+              <ul class="plain">
+                <li>默认本地转写；未同意不上传音频或正文</li>
+                <li>ASR / 文本 AI 分项授权，日志不记录 Key 与全文</li>
+                <li>模型与密钥不进入 Git</li>
+              </ul>
+              <p class="muted">MIT License · 反馈请开 GitHub Issue</p>
+            </section>
+
+            <p id="settingsToast" class="toast" aria-live="polite"></p>
+          </main>
+        </div>
+      </dialog>
+
       <footer class="wb-footer">
-        <p class="wb-hint">
+        <p class="wb-hint" id="draftFooterHint">
           按住 <kbd id="hotkeyHint">Control+Alt+Space</kbd> 继续说；
           按住 <kbd id="editHotkeyHint">Control+Alt+Shift+Space</kbd> 说修改要求。
         </p>
         <p id="status" class="wb-status">就绪</p>
       </footer>
+      </div>
     </div>
 
     <section class="spike-panel" id="spikePanel" hidden>

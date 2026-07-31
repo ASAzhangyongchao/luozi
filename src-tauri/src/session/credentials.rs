@@ -15,13 +15,7 @@ pub fn set_secret(account: &str, secret: &str) -> Result<(), String> {
     {
         // Delete then add — `-U` update is flaky across macOS versions.
         let _ = Command::new("security")
-            .args([
-                "delete-generic-password",
-                "-s",
-                SERVICE,
-                "-a",
-                account,
-            ])
+            .args(["delete-generic-password", "-s", SERVICE, "-a", account])
             .output();
         let status = Command::new("security")
             .args([
@@ -80,14 +74,7 @@ pub fn get_secret(account: &str) -> Result<String, String> {
     #[cfg(target_os = "macos")]
     {
         let out = Command::new("security")
-            .args([
-                "find-generic-password",
-                "-s",
-                SERVICE,
-                "-a",
-                account,
-                "-w",
-            ])
+            .args(["find-generic-password", "-s", SERVICE, "-a", account, "-w"])
             .output()
             .map_err(|e| format!("keychain_read_failed: {e}"))?;
         if !out.status.success() {
@@ -102,27 +89,6 @@ pub fn get_secret(account: &str) -> Result<String, String> {
     #[cfg(not(target_os = "macos"))]
     {
         Err("cloud_unauthorized".into())
-    }
-}
-
-pub fn delete_secret(account: &str) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        let _ = Command::new("security")
-            .args([
-                "delete-generic-password",
-                "-s",
-                SERVICE,
-                "-a",
-                account,
-            ])
-            .status();
-        Ok(())
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = account;
-        Ok(())
     }
 }
 

@@ -1,14 +1,15 @@
 :root {
   /* Force light plate so dark-mode OS chrome does not bleed into rounded corners. */
   color-scheme: light;
+  /* Align with draft / Falling Cursor tokens */
   --night-teal: #0b3034;
   --aurora-cyan: #42d9d3;
   --ice-white: #f4fbfa;
   --amber: #e8a54b;
   --risk-red: #e85d5d;
 
-  --bg: #f4fbfa;
-  --panel: #f7fcfb;
+  --bg: var(--ice-white);
+  --panel: color-mix(in srgb, #ffffff 78%, var(--ice-white));
   --line: color-mix(in srgb, var(--night-teal) 12%, transparent);
   --text: var(--night-teal);
   --muted: color-mix(in srgb, var(--night-teal) 58%, transparent);
@@ -49,8 +50,13 @@ body.settings-body {
 
 .settings-shell {
   display: grid;
-  grid-template-columns: 168px 1fr;
+  grid-template-columns: 168px minmax(0, 1fr);
   min-height: 100vh;
+}
+
+body.settings-embed .settings-shell,
+.settings-dialog .settings-shell {
+  min-height: 0;
 }
 
 .settings-nav {
@@ -59,7 +65,7 @@ body.settings-body {
   gap: 4px;
   padding: 16px 10px;
   border-right: 1px solid var(--line);
-  background: var(--panel);
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
 }
 
 .nav-item {
@@ -111,7 +117,8 @@ body.settings-body {
   border-bottom: 1px solid var(--line);
 }
 
-.row strong {
+.settings-shell .row strong,
+.guide-shell .row strong {
   font-size: 14px;
 }
 
@@ -127,10 +134,11 @@ body.settings-body {
   margin-top: 14px;
 }
 
-button {
+.settings-shell .settings-main button,
+.guide-footer button {
   appearance: none;
   border: 1px solid color-mix(in srgb, var(--night-teal) 14%, transparent);
-  background: #ffffff;
+  background: color-mix(in srgb, #ffffff 55%, transparent);
   color: var(--text);
   border-radius: 8px;
   padding: 7px 12px;
@@ -138,7 +146,7 @@ button {
   cursor: pointer;
 }
 
-button.btn-quiet {
+.settings-shell .settings-main button.btn-quiet {
   border-color: transparent;
   background: transparent;
   color: var(--muted);
@@ -146,16 +154,17 @@ button.btn-quiet {
   text-underline-offset: 3px;
 }
 
-button.btn-quiet:hover:not(:disabled) {
+.settings-shell .settings-main button.btn-quiet:hover:not(:disabled) {
   color: var(--text);
   border-color: transparent;
 }
 
-button:hover:not(:disabled) {
+.settings-shell .settings-main button:hover:not(:disabled),
+.guide-footer button:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
 }
 
-button:disabled {
+.settings-shell .settings-main button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
@@ -190,7 +199,8 @@ button:disabled {
   border-color: color-mix(in srgb, var(--amber) 45%, var(--line));
 }
 
-code {
+.settings-shell code,
+.guide-shell code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
   padding: 4px 8px;
@@ -314,4 +324,114 @@ ul.plain {
 .pick-actions {
   display: flex;
   justify-content: flex-end;
+}
+
+.guide-shell {
+  min-height: 100vh;
+}
+
+.guide-column {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 100vh;
+}
+
+.guide-column .settings-main {
+  flex: 1;
+}
+
+.guide-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 28px 16px;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.guide-footer button {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.guide-footer button:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: color-mix(in srgb, var(--accent) 10%, #fff);
+}
+
+.settings-section ol.guide-steps,
+.settings-section ul.guide-list {
+  margin: 0 0 14px;
+  padding-left: 1.25rem;
+}
+
+.settings-section ol.guide-steps li,
+.settings-section ul.guide-list li {
+  margin: 0.45rem 0;
+}
+
+.settings-section kbd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.coming-soon {
+  margin-top: 18px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+  overflow: hidden;
+}
+
+.coming-soon > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 12px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  user-select: none;
+}
+
+.coming-soon > summary::-webkit-details-marker {
+  display: none;
+}
+
+.coming-soon > summary::before {
+  content: "▸ ";
+  color: var(--accent);
+}
+
+.coming-soon[open] > summary::before {
+  content: "▾ ";
+}
+
+.coming-soon .row {
+  margin: 0 14px;
+  padding: 12px 0;
+}
+
+.coming-soon .row:last-child {
+  border-bottom: 0;
+}
+
+body.settings-embed {
+  min-height: 100%;
+  background: var(--bg);
+}
+
+body.settings-embed .settings-shell {
+  min-height: 100%;
+  height: 100%;
 }

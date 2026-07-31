@@ -3,8 +3,8 @@ mod spike;
 
 use luozi_core::AppConfig;
 use session::{
-    session_cancel, session_start, session_status, session_stop, session_undo_last, AppSessionState,
-    DraftStateDto, DraftStore,
+    session_cancel, session_start, session_status, session_stop, session_undo_last,
+    AppSessionState, DraftStateDto, DraftStore,
 };
 use spike::{
     capture_target, deliver_probe, record_one_second_probe, run_delivery_matrix_probe,
@@ -52,6 +52,19 @@ fn draft_clear(draft: tauri::State<'_, DraftStore>) -> Result<DraftStateDto, Str
 #[tauri::command]
 fn draft_load_last(draft: tauri::State<'_, DraftStore>) -> Result<DraftStateDto, String> {
     draft.load_last_into_draft()
+}
+
+#[tauri::command]
+fn history_list(draft: tauri::State<'_, DraftStore>) -> Vec<session::HistoryItemDto> {
+    draft.history_list()
+}
+
+#[tauri::command]
+fn history_load_into_draft(
+    id: String,
+    draft: tauri::State<'_, DraftStore>,
+) -> Result<DraftStateDto, String> {
+    draft.load_history_into_draft(&id)
 }
 
 #[tauri::command]
@@ -156,6 +169,16 @@ fn settings_open_spike(app: tauri::AppHandle) {
 }
 
 #[tauri::command]
+fn open_settings_window(app: tauri::AppHandle, section: Option<String>) {
+    show_settings(&app, section.as_deref().or(Some("general")));
+}
+
+#[tauri::command]
+fn open_guide_window(app: tauri::AppHandle) {
+    show_guide(&app);
+}
+
+#[tauri::command]
 fn settings_take_nav() -> Option<String> {
     session::settings_api::take_pending_section()
 }
@@ -200,6 +223,14 @@ fn show_spike(app: &tauri::AppHandle) {
 
 fn show_about(app: &tauri::AppHandle) {
     show_settings(app, Some("about"));
+}
+
+fn show_guide(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("guide") {
+        let _ = window.set_title("落字 · 如何使用");
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
 }
 
 fn with_session<F>(app: &tauri::AppHandle, f: F)
@@ -261,19 +292,14 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let asr_mode = MenuItem::with_id(
         app,
         "asr_mode",
-        &format!("切换引擎模式（当前：{}）", cfg.asr_mode.label_zh()),
+        format!("切换引擎模式（当前：{}）", cfg.asr_mode.label_zh()),
         true,
         None::<&str>,
     )?;
-    let fetch_model = MenuItem::with_id(
-        app,
-        "fetch_model",
-        "下载推荐模型…",
-        true,
-        None::<&str>,
-    )?;
+    let fetch_model = MenuItem::with_id(app, "fetch_model", "下载推荐模型…", true, None::<&str>)?;
     let sep_prefs = PredefinedMenuItem::separator(app)?;
 
+    let guide = MenuItem::with_id(app, "guide", "如何使用…", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", "设置…", true, None::<&str>)?;
     let about = MenuItem::with_id(app, "about", "关于落字", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "退出落字", true, None::<&str>)?;
@@ -294,6 +320,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             &asr_mode,
             &fetch_model,
             &sep_prefs,
+            &guide,
             &settings,
             &about,
             &quit,
@@ -306,6 +333,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         .tooltip("落字 Luozi")
         .on_menu_event(|app, event| match event.id.as_ref() {
             "draft" => show_draft(app),
+            "guide" => show_guide(app),
             "settings" => show_settings(app, Some("general")),
             "about" => show_about(app),
             "start" => with_session(app, |s| {
@@ -335,16 +363,16 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             "quit" => app.exit(0),
             _ => {}
         })
-        .on_tray_icon_event(|_tray, event| {
-            // Formal product path is hotkey + menu. Left-click must NOT open the
-            // unfinished practice window (that confused formal testing).
+        .on_tray_icon_event(|tray, event| {
+            // Left-click opens the draft workbench (main product surface).
+            // Right-click still shows the menu for Settings / How-to / etc.
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
                 ..
             } = event
             {
-                eprintln!("luozi: tray left-click ignored (use menu / hotkey)");
+                show_draft(tray.app_handle());
             }
         });
 
@@ -456,43 +484,46 @@ fn register_session_shortcuts(app: &tauri::AppHandle) -> Result<String, String> 
             }
         };
         let hold = cfg.hold_to_talk;
-        match app.global_shortcut().on_shortcut(sc, move |app, shortcut, event| {
-            eprintln!(
-                "luozi: voice-edit hotkey {} {:?}",
-                shortcut.into_string(),
-                event.state
-            );
-            let app = app.clone();
-            match event.state {
-                ShortcutState::Pressed => {
-                    std::thread::spawn(move || {
-                        with_session(&app, |s| {
-                            session::controller::note_hold_pressed(s);
-                            if let Err(err) = session::controller::start_voice_edit_session(&app, s)
-                            {
-                                if err != "draft_empty" {
-                                    eprintln!("luozi: voice_edit start failed: {err}");
+        match app
+            .global_shortcut()
+            .on_shortcut(sc, move |app, shortcut, event| {
+                eprintln!(
+                    "luozi: voice-edit hotkey {} {:?}",
+                    shortcut.into_string(),
+                    event.state
+                );
+                let app = app.clone();
+                match event.state {
+                    ShortcutState::Pressed => {
+                        std::thread::spawn(move || {
+                            with_session(&app, |s| {
+                                session::controller::note_hold_pressed(s);
+                                if let Err(err) =
+                                    session::controller::start_voice_edit_session(&app, s)
+                                {
+                                    if err != "draft_empty" {
+                                        eprintln!("luozi: voice_edit start failed: {err}");
+                                    }
                                 }
-                            }
+                            });
                         });
-                    });
-                }
-                ShortcutState::Released if hold => {
-                    std::thread::spawn(move || {
-                        with_session(&app, |s| {
-                            session::controller::note_hold_released(s);
-                            if !session::controller::wait_until_recording(s, 800) {
-                                return;
-                            }
-                            if let Err(err) = session::controller::stop_session(&app, s) {
-                                eprintln!("luozi: voice_edit stop failed: {err}");
-                            }
+                    }
+                    ShortcutState::Released if hold => {
+                        std::thread::spawn(move || {
+                            with_session(&app, |s| {
+                                session::controller::note_hold_released(s);
+                                if !session::controller::wait_until_recording(s, 800) {
+                                    return;
+                                }
+                                if let Err(err) = session::controller::stop_session(&app, s) {
+                                    eprintln!("luozi: voice_edit stop failed: {err}");
+                                }
+                            });
                         });
-                    });
+                    }
+                    _ => {}
                 }
-                _ => {}
-            }
-        }) {
+            }) {
             Ok(()) => {
                 eprintln!("luozi: voice-edit shortcut registered: {raw}");
                 break;
@@ -555,10 +586,14 @@ pub fn run() {
             }
             if let Some(settings) = app.get_webview_window("settings") {
                 // Match settings CSS ice-white so dark-mode OS chrome does not show in corners.
-                let _ = settings.set_background_color(Some(tauri::window::Color(
-                    0xf4, 0xfb, 0xfa, 0xff,
-                )));
+                let _ = settings
+                    .set_background_color(Some(tauri::window::Color(0xf4, 0xfb, 0xfa, 0xff)));
                 let _ = settings.hide();
+            }
+            if let Some(guide) = app.get_webview_window("guide") {
+                let _ =
+                    guide.set_background_color(Some(tauri::window::Color(0xf4, 0xfb, 0xfa, 0xff)));
+                let _ = guide.hide();
             }
             if let Some(overlay) = app.get_webview_window("overlay") {
                 // Clear plate so CSS border-radius does not sit on a white window.
@@ -577,13 +612,11 @@ pub fn run() {
             // M4: unload Whisper after ≥5 minutes idle (poll once a minute).
             {
                 let handle = app.handle().clone();
-                std::thread::spawn(move || {
-                    loop {
-                        std::thread::sleep(std::time::Duration::from_secs(60));
-                        with_session(&handle, |s| {
-                            session::controller::maybe_unload_idle_asr(s);
-                        });
-                    }
+                std::thread::spawn(move || loop {
+                    std::thread::sleep(std::time::Duration::from_secs(60));
+                    with_session(&handle, |s| {
+                        session::controller::maybe_unload_idle_asr(s);
+                    });
                 });
             }
 
@@ -686,7 +719,7 @@ pub fn run() {
                         }
                     }
                     let _ = window.hide();
-                } else if window.label() == "settings" {
+                } else if matches!(window.label(), "settings" | "guide") {
                     api.prevent_close();
                     let _ = window.hide();
                 }
@@ -705,6 +738,8 @@ pub fn run() {
             draft_redo,
             draft_clear,
             draft_load_last,
+            history_list,
+            history_load_into_draft,
             draft_insert,
             draft_set_selection,
             draft_apply_pending,
@@ -724,6 +759,8 @@ pub fn run() {
             settings_open_repo,
             settings_open_releases,
             settings_open_spike,
+            open_settings_window,
+            open_guide_window,
             settings_take_nav,
             run_focus_abc_probe,
             run_delivery_matrix_probe,
@@ -733,8 +770,14 @@ pub fn run() {
             validate_target,
             deliver_probe
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // Dock / app icon click while already running → show draft (same as tray left-click).
+            if let tauri::RunEvent::Reopen { .. } = event {
+                show_draft(app_handle);
+            }
+        });
 }
 
 #[cfg(test)]

@@ -5,8 +5,8 @@ use accessibility_sys::{
     kAXChildrenAttribute, kAXErrorSuccess, kAXFocusedApplicationAttribute, kAXFocusedAttribute,
     kAXFocusedUIElementAttribute, kAXFocusedWindowAttribute, kAXIdentifierAttribute,
     kAXPositionAttribute, kAXRoleAttribute, kAXSecureTextFieldSubrole, kAXSelectedTextAttribute,
-    kAXSizeAttribute, kAXSubroleAttribute, kAXTextAreaRole, kAXTextFieldRole, kAXValueAttribute,
-    kAXTrustedCheckOptionPrompt, kAXValueTypeCGPoint, kAXValueTypeCGSize,
+    kAXSizeAttribute, kAXSubroleAttribute, kAXTextAreaRole, kAXTextFieldRole,
+    kAXTrustedCheckOptionPrompt, kAXValueAttribute, kAXValueTypeCGPoint, kAXValueTypeCGSize,
     AXIsProcessTrustedWithOptions, AXUIElementCopyAttributeValue, AXUIElementCreateApplication,
     AXUIElementCreateSystemWide, AXUIElementGetPid, AXUIElementRef, AXUIElementSetAttributeValue,
     AXValueGetType, AXValueGetValue, AXValueRef,
@@ -181,10 +181,7 @@ pub(crate) fn activate_pid(pid: i32) -> Result<(), String> {
     let Some(app) = NSRunningApplication::runningApplicationWithProcessIdentifier(pid) else {
         return Err(format!("no_running_app_for_pid:{pid}"));
     };
-    let ok = app.activateWithOptions(
-        NSApplicationActivationOptions::ActivateIgnoringOtherApps
-            | NSApplicationActivationOptions::ActivateAllWindows,
-    );
+    let ok = app.activateWithOptions(NSApplicationActivationOptions::ActivateAllWindows);
     if ok {
         Ok(())
     } else {
@@ -246,7 +243,9 @@ unsafe fn capture_focused_from_app(app: AXUIElementRef) -> Result<FocusedAx, Str
             if let Some(window) = window {
                 CFRelease(window as _);
             }
-            return Err(format!("AXUIElementGetPid failed ({pid_err}/{app_pid_err})"));
+            return Err(format!(
+                "AXUIElementGetPid failed ({pid_err}/{app_pid_err})"
+            ));
         }
     }
 

@@ -11,6 +11,7 @@ use sha2::{Digest, Sha256};
 use super::asr::{self, APP_SUPPORT_DIR_NAME, MODEL_FILE_NAME};
 
 const MANIFEST_JSON: &str = include_str!("../../resources/models-manifest.json");
+const MANIFEST_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -36,7 +37,15 @@ pub struct ModelEntry {
 }
 
 pub fn load_manifest() -> Result<ModelManifest, String> {
-    serde_json::from_str(MANIFEST_JSON).map_err(|e| format!("model_manifest_invalid: {e}"))
+    let manifest: ModelManifest =
+        serde_json::from_str(MANIFEST_JSON).map_err(|e| format!("model_manifest_invalid: {e}"))?;
+    if manifest.schema_version != MANIFEST_SCHEMA_VERSION {
+        return Err(format!(
+            "model_manifest_schema_unsupported: got {} expected {MANIFEST_SCHEMA_VERSION}",
+            manifest.schema_version
+        ));
+    }
+    Ok(manifest)
 }
 
 pub fn recommended_model() -> Result<ModelEntry, String> {
@@ -44,7 +53,11 @@ pub fn recommended_model() -> Result<ModelEntry, String> {
     m.models
         .into_iter()
         .find(|e| e.recommended)
-        .or_else(|| load_manifest().ok().and_then(|x| x.models.into_iter().next()))
+        .or_else(|| {
+            load_manifest()
+                .ok()
+                .and_then(|x| x.models.into_iter().next())
+        })
         .ok_or_else(|| "model_manifest_empty".into())
 }
 
@@ -172,9 +185,8 @@ where
     download_to(&entry.url, &partial, entry.bytes, &mut on_progress)?;
 
     on_progress(95, "verifying");
-    verify_entry(&partial, &entry).map_err(|e| {
+    verify_entry(&partial, &entry).inspect_err(|_| {
         let _ = fs::remove_file(&partial);
-        e
     })?;
 
     // Replace destination atomically-ish.
@@ -185,7 +197,12 @@ where
     Ok(dest)
 }
 
-fn download_to<F>(url: &str, dest: &Path, expected_bytes: u64, on_progress: &mut F) -> Result<(), String>
+fn download_to<F>(
+    url: &str,
+    dest: &Path,
+    expected_bytes: u64,
+    on_progress: &mut F,
+) -> Result<(), String>
 where
     F: FnMut(u8, &str),
 {
@@ -229,8 +246,11 @@ where
         file.write_all(&buf[..n])
             .map_err(|e| format!("model_download_write_failed: {e}"))?;
         written += n as u64;
-        if expected_bytes > 0 {
-            let pct = ((written * 90) / expected_bytes).min(90) as u8;
+        if let Some(progress) = written
+            .checked_mul(90)
+            .and_then(|value| value.checked_div(expected_bytes))
+        {
+            let pct = progress.min(90) as u8;
             on_progress(pct.max(1), "downloading");
         }
     }

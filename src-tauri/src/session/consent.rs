@@ -77,14 +77,6 @@ pub fn grant(provider_id: &str, host: &str) -> Result<(), String> {
     save(&store)
 }
 
-pub fn revoke(provider_id: &str, host: &str) -> Result<(), String> {
-    let mut store = load();
-    store
-        .entries
-        .retain(|e| !(e.provider_id == provider_id && e.host.eq_ignore_ascii_case(host)));
-    save(&store)
-}
-
 fn chrono_like_now() -> String {
     // Avoid chrono dep: local RFC3339-ish via system time.
     use std::time::{SystemTime, UNIX_EPOCH};

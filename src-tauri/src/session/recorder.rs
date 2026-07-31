@@ -69,10 +69,14 @@ impl SessionRecorder {
         let samples: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
         let err: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
 
-        let stream = build_stream(&device, &config, sample_format, samples.clone(), err.clone())?;
-        stream
-            .play()
-            .map_err(|e| map_err_string(e.to_string()))?;
+        let stream = build_stream(
+            &device,
+            &config,
+            sample_format,
+            samples.clone(),
+            err.clone(),
+        )?;
+        stream.play().map_err(|e| map_err_string(e.to_string()))?;
 
         self.active = Some(Active {
             stream,
@@ -86,7 +90,10 @@ impl SessionRecorder {
     }
 
     pub fn stop(&mut self) -> Result<AudioCapture, String> {
-        let active = self.active.take().ok_or_else(|| "not_recording".to_string())?;
+        let active = self
+            .active
+            .take()
+            .ok_or_else(|| "not_recording".to_string())?;
         let duration_ms = active.started.elapsed().as_millis() as u64;
         drop(active.stream);
 
@@ -141,7 +148,7 @@ fn build_stream(
         SampleFormat::F32 => {
             let samples_cb = samples;
             device.build_input_stream(
-                config.clone(),
+                *config,
                 move |data: &[f32], _| {
                     if let Ok(mut buf) = samples_cb.lock() {
                         buf.extend_from_slice(data);
@@ -154,7 +161,7 @@ fn build_stream(
         SampleFormat::I16 => {
             let samples_cb = samples;
             device.build_input_stream(
-                config.clone(),
+                *config,
                 move |data: &[i16], _| {
                     if let Ok(mut buf) = samples_cb.lock() {
                         buf.extend(data.iter().map(|s| *s as f32 / i16::MAX as f32));
@@ -167,7 +174,7 @@ fn build_stream(
         SampleFormat::I32 => {
             let samples_cb = samples;
             device.build_input_stream(
-                config.clone(),
+                *config,
                 move |data: &[i32], _| {
                     if let Ok(mut buf) = samples_cb.lock() {
                         buf.extend(data.iter().map(|s| *s as f32 / i32::MAX as f32));
@@ -180,7 +187,7 @@ fn build_stream(
         SampleFormat::U16 => {
             let samples_cb = samples;
             device.build_input_stream(
-                config.clone(),
+                *config,
                 move |data: &[u16], _| {
                     if let Ok(mut buf) = samples_cb.lock() {
                         buf.extend(
@@ -213,4 +220,3 @@ fn map_err_string(msg_raw: String) -> String {
         format!("stream_failed: {msg_raw}")
     }
 }
-
